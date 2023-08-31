@@ -7,6 +7,7 @@
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 use nix::sys::socket::{ sendto, MsgFlags, NetlinkAddr, recvfrom };
+use std::collections::HashMap;
 use std::io::{Error, ErrorKind, Result};
 use std::mem;
 use std::os::fd::AsRawFd;
@@ -43,20 +44,21 @@ pub const fn nl_align_length(size: usize) -> usize {
 }
 
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
-pub struct AlignedBuffer {
-    pub inner: [u8; 1024],
+pub struct NlmsgBuffer {
+    inner: [u8; 1024],
     size: usize,
     pos: usize,
+    attrs: HashMap<u16, (usize, usize)>,
 }
 
-impl AlignedBuffer {
+impl NlmsgBuffer {
     pub fn zeroes() -> Self {
-        let buf = AlignedBuffer { inner: [0u8; 1024], size: 0, pos: 0 };
+        let buf = NlmsgBuffer { inner: [0u8; 1024], size: 0, pos: 0, attrs: HashMap::new() };
 
         println!(
             "Alignment of recv buffer : {}, address {:?}, inner address {:?}",
             mem::align_of_val(&buf),
-            (&buf) as *const AlignedBuffer,
+            (&buf) as *const NlmsgBuffer,
             buf.inner.as_ptr()
         );
 
@@ -95,16 +97,38 @@ impl AlignedBuffer {
         }
 
         println!("Recevied nl header : {:?}", header);
-        let ge_header = self.deserialize::<genlmsghdr>()?;
-        println!("Recevied gen header : {:?}", ge_header);
-        while let Ok(attr) = self.deserialize::<nlattr>() {
-            println!("New attribute : {:?}", attr);
-            let data = &self.inner[self.pos..self.pos+attr.payload_length()];
-            println!("Attribute data : {:?}", data);
-            self.pos += nl_align_length(attr.payload_length());
+        match header.nlmsg_type as u32 {
+            GENL_ID_CTRL => {
+                let ge_header = self.deserialize::<genlmsghdr>()?;
+                println!("Receveid gen header : {:?}", ge_header);
+                while let Ok(attr) = self.deserialize::<nlattr>() {
+                    self.attrs.insert(attr.nla_type, (self.pos, self.pos+attr.payload_length()));
+                    self.pos += nl_align_length(attr.payload_length());
+                }
+            },
+            NLMSG_ERROR => {
+                let errno = i32::from_le_bytes(self.inner[self.pos..self.pos+4].try_into().unwrap());
+                if errno < 0 {
+                    println!("Received netlink error {}", errno);
+                }
+                // else it's not an error, but indicates success
+            },
+            a => {
+                panic!("Unsupported netlink message type : {}", a)
+            }
         }
 
         Ok(())
+    }
+
+    pub fn get_attr(&self, attr_id: u32) -> Option<&[u8]>{
+        let (start, end) = self.attrs.get(&(attr_id as u16))?;
+        Some(&self.inner[*start..*end])
+    }
+
+    pub fn get_attr_u16(&self, attr_id: u32) -> Option<u16>{
+        let buf = self.get_attr(attr_id)?[0..2].try_into().ok()?;
+        Some(u16::from_le_bytes(buf))
     }
 }
 
@@ -154,7 +178,17 @@ pub fn get_family_info<T: AsRawFd>(family_name: &[u8], fd: T) {
     )
     .unwrap();
 
-    let mut buffer = AlignedBuffer::zeroes();
+    let mut buffer = NlmsgBuffer::zeroes();
+    buffer.recv(fd.as_raw_fd()).unwrap();
+    buffer.parse().unwrap();
+    println!("Familly name : {:?}", buffer.get_attr(CTRL_ATTR_FAMILY_NAME));
+    println!("Familly id : {}", buffer.get_attr_u16(CTRL_ATTR_FAMILY_ID).unwrap());
+    /*
+    for (nla_type, (start, end)) in buffer.attrs {
+        println!("Attr type {} : {:?}", nla_type, &buffer.inner[start..end]);
+    }
+    */
+    let mut buffer = NlmsgBuffer::zeroes();
     buffer.recv(fd.as_raw_fd()).unwrap();
     buffer.parse().unwrap();
 }
