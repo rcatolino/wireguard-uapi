@@ -1,10 +1,10 @@
 mod netlink;
 
-use std::os::fd::AsRawFd;
-use netlink::{wgdevice_attribute, wg_cmd};
+use netlink::{wg_cmd, wgdevice_attribute};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
+use std::os::fd::AsRawFd;
 
 fn main() {
     let s = socket(
@@ -24,9 +24,13 @@ fn main() {
         .attr(wgdevice_attribute::WGDEVICE_A_IFINDEX as u16, 19u32);
 
     get_dev_cmd.sendto(&s).unwrap();
-    let mut buffer = netlink::MsgBuffer::zeroes();
+    let mut buffer = netlink::MsgBuffer::new(fid);
     buffer.recv(&s).unwrap();
-    for (nla_type, (start, end)) in buffer.attrs {
-        println!("Attr type {} : {:?}", nla_type, &buffer.inner[start..end]);
+    for mb_msg in &buffer {
+        let msg = mb_msg.unwrap();
+        println!("Msg header {:?}", msg.header);
+        for (nla_type, (start, end)) in msg.attrs {
+            println!("Attr type {} : {:?}", nla_type, &buffer.inner[start..end]);
+        }
     }
 }
