@@ -46,42 +46,53 @@ pub const fn nl_align_length(size: usize) -> usize {
 }
 
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
-pub struct NlmsgBuffer {
-    inner: [u8; 1024],
+pub struct MsgBuffer {
+    pub inner: [u8; 2048],
     size: usize,
     pos: usize,
-    attrs: HashMap<u16, (usize, usize)>,
+    pub attrs: HashMap<u16, (usize, usize)>,
 }
 
-pub trait ToAttr: Sized {
-    fn to_attr(buffer: &[u8]) -> Option<Self>;
+pub trait ToAttr : Sized{
+    fn serialize_at(self, out: &mut [u8], pos: usize);
 }
 
 impl ToAttr for u32 {
-    fn to_attr(buffer: &[u8]) -> Option<Self> {
+    fn serialize_at(self, out: &mut [u8], pos: usize) {
+        let tlen = mem::size_of::<Self>();
+        out[pos..pos + tlen].copy_from_slice(&self.to_le_bytes());
+    }
+}
+
+pub trait FromAttr: Sized {
+    fn from_attr(buffer: &[u8]) -> Option<Self>;
+}
+
+impl FromAttr for u32 {
+    fn from_attr(buffer: &[u8]) -> Option<Self> {
         let buf = buffer[0..4].try_into().ok()?;
         Some(u32::from_le_bytes(buf))
     }
 }
 
-impl ToAttr for i32 {
-    fn to_attr(buffer: &[u8]) -> Option<Self> {
+impl FromAttr for i32 {
+    fn from_attr(buffer: &[u8]) -> Option<Self> {
         let buf = buffer[0..4].try_into().ok()?;
         Some(i32::from_le_bytes(buf))
     }
 }
 
-impl ToAttr for u16 {
-    fn to_attr(buffer: &[u8]) -> Option<Self> {
+impl FromAttr for u16 {
+    fn from_attr(buffer: &[u8]) -> Option<Self> {
         let buf = buffer[0..2].try_into().ok()?;
         Some(u16::from_le_bytes(buf))
     }
 }
 
-impl NlmsgBuffer {
+impl MsgBuffer {
     pub fn zeroes() -> Self {
-        let buf = NlmsgBuffer {
-            inner: [0u8; 1024],
+        let buf = MsgBuffer {
+            inner: [0u8; 2048],
             size: 0,
             pos: 0,
             attrs: HashMap::new(),
@@ -91,7 +102,7 @@ impl NlmsgBuffer {
         println!(
             "Alignment of recv buffer : {}, address {:?}, inner address {:?}",
             mem::align_of_val(&buf),
-            (&buf) as *const NlmsgBuffer,
+            (&buf) as *const MsgBuffer,
             buf.inner.as_ptr()
         );
         */
@@ -99,7 +110,7 @@ impl NlmsgBuffer {
         buf
     }
 
-    pub fn recv<T: AsRawFd>(&mut self, fd: T) -> Result<()> {
+    pub fn recv<T: AsRawFd>(&mut self, fd: &T) -> Result<()> {
         let (read, _addr) = recvfrom::<NetlinkAddr>(fd.as_raw_fd(), &mut self.inner)?;
         // println!("Hello netlink : {:?} from {:?}", &self.inner[..read], _addr);
         self.size = read;
@@ -148,7 +159,7 @@ impl NlmsgBuffer {
                 }
             }
             NLMSG_ERROR => {
-                let errno = i32::to_attr(&self.inner[self.pos..self.pos + 4]).unwrap();
+                let errno = i32::from_attr(&self.inner[self.pos..self.pos + 4]).unwrap();
                 if errno < 0 {
                     println!("Received netlink error {}", errno);
                     return Err(Error::from_raw_os_error(errno));
@@ -168,16 +179,16 @@ impl NlmsgBuffer {
         Some(&self.inner[*start..*end])
     }
 
-    pub fn get_attr<T: ToAttr>(&self, attr_id: u32) -> Option<T> {
-        T::to_attr(self.get_attr_bytes(attr_id)?)
+    pub fn get_attr<T: FromAttr>(&self, attr_id: u32) -> Option<T> {
+        T::from_attr(self.get_attr_bytes(attr_id)?)
     }
 }
 
 pub struct MsgBuilder {
-    inner: [u8; 1024],
+    pub inner: [u8; 2048],
     header: nlmsghdr,
     gen_header: genlmsghdr,
-    pos: usize,
+    pub pos: usize,
 }
 
 impl nlmsghdr {
@@ -195,7 +206,7 @@ impl nlmsghdr {
 impl MsgBuilder {
     pub fn new(family: u16, seq: u32, cmd: u8) -> Self {
         MsgBuilder {
-            inner: [0u8; 1024],
+            inner: [0u8; 2048],
             header: nlmsghdr::new(family, seq),
             gen_header: genlmsghdr {
                 cmd,
@@ -204,6 +215,25 @@ impl MsgBuilder {
             },
             pos: nl_size_of_aligned::<nlmsghdr>() + nl_size_of_aligned::<genlmsghdr>(),
         }
+    }
+
+    pub fn dump(mut self) -> Self {
+        self.header.nlmsg_flags |= NLM_F_DUMP as u16;
+        self
+    }
+
+    pub fn attr<T: ToAttr>(mut self, attr_type: u16, payload: T) -> Self {
+        let tlen = mem::size_of::<T>();
+        let attr = nlattr {
+            // nla_len doesn't include potential padding for the payload
+            nla_len: nl_size_of_aligned::<nlattr>() as u16 +  tlen as u16,
+            nla_type: attr_type,
+        };
+
+        copy_to_slice!(self.inner, self.pos, attr, nlattr);
+        payload.serialize_at(&mut self.inner, self.pos);
+        self.pos += nl_align_length(tlen); // The next attr header must be aligned
+        self
     }
 
     pub fn attr_bytes(mut self, attr_type: u16, payload: &[u8]) -> Self {
@@ -241,8 +271,8 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     builder.sendto(fd)?;
 
     // Receive response :
-    let mut buffer = NlmsgBuffer::zeroes();
-    buffer.recv(fd.as_raw_fd())?;
+    let mut buffer = MsgBuffer::zeroes();
+    buffer.recv(fd)?;
     let fid = buffer.get_attr::<u16>(CTRL_ATTR_FAMILY_ID).unwrap();
     /*
     for (nla_type, (start, end)) in buffer.attrs {
@@ -251,8 +281,8 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     */
 
     // Receive error msg :
-    let mut buffer = NlmsgBuffer::zeroes();
-    buffer.recv(fd.as_raw_fd()).unwrap();
+    let mut buffer = MsgBuffer::zeroes();
+    buffer.recv(fd)?;
 
     // We now know the family id !
     Ok(fid)
