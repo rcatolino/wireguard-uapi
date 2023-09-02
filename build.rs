@@ -17,6 +17,7 @@ fn main() {
         .allowlist_var("CTRL_CMD.*")
         .allowlist_var("CTRL_ATTR.*")
         .allowlist_var("NLM_F_.*")
+        .allowlist_var("NLA_F_.*")
         .allowlist_var("NLMSG_.*")
         .allowlist_var("GENL_ID_CTRL")
         .allowlist_file(".*wireguard.h")

@@ -30,6 +30,15 @@ macro_rules! copy_to_slice (
 );
 
 impl nlattr {
+    fn is_nested(&self) -> bool {
+        (NLA_F_NESTED as u16 & self.nla_type) == NLA_F_NESTED as u16
+    }
+
+    fn payload_type(&self) -> u16 {
+        const type_mask : u16 = !(NLA_F_NESTED as u16 | NLA_F_NET_BYTEORDER as u16);
+        self.nla_type & type_mask 
+    }
+
     fn payload_length(&self) -> usize {
         self.nla_len as usize - nl_size_of_aligned::<Self>()
     }
@@ -43,6 +52,33 @@ pub const fn nl_align_length(size: usize) -> usize {
     // Everything is aligned to 4 bytes in netlink messages.
     // This is the equivalent of the NLMSG_ALIGN macro.
     ((size) + 3) & !3
+}
+
+#[derive(Debug)]
+pub struct Attribute {
+    payload_start: usize,
+    payload_end: usize,
+    pub sub_attributes: Option<HashMap<u16, Attribute>>,
+}
+
+impl Attribute {
+    fn new(attr: nlattr, start: usize) -> Self {
+        Attribute {
+            payload_start: start,
+            payload_end: start+attr.payload_length(),
+            sub_attributes: None,
+        }
+    }
+
+    pub fn get_attr_bytes<'a>(&self, buffer: &'a MsgBuffer, attr_id: u32) -> Option<&'a [u8]> {
+        let attr = self.sub_attributes.as_ref()?.get(&(attr_id as u16))?;
+        Some(&buffer.inner[attr.payload_start..attr.payload_end])
+    }
+
+    pub fn get_attr<T: FromAttr>(&self, buffer: &MsgBuffer, attr_id: u32) -> Option<T> {
+        T::from_attr(self.get_attr_bytes(buffer, attr_id)?)
+    }
+
 }
 
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
@@ -92,37 +128,55 @@ impl FromAttr for u16 {
 pub struct PartIterator<'a> {
     pos: usize,
     msg: &'a MsgBuffer,
-    current_msg_limit: usize,
 }
 
 pub struct MsgPart {
-    pub attrs: HashMap<u16, (usize, usize)>,
+    pub attrs: HashMap<u16, Attribute>,
     pub header: nlmsghdr,
     gen_header: genlmsghdr,
 }
 
 impl<'a> PartIterator<'a> {
-    fn deserialize<T: Copy>(&mut self) -> Option<T> {
-        if (self.current_msg_limit - self.pos) < mem::size_of::<T>() {
+    fn parse_attrs(&self, mut start: usize, limit: usize) -> HashMap<u16, Attribute> {
+        let mut attrs = HashMap::new();
+        while let Some((attr, pos)) = self.deserialize::<nlattr>(start, limit) {
+            start += pos;
+            let mut a = Attribute::new(attr, start);
+            if attr.is_nested() {
+                println!("New nested attribute type {} from {} to {}",
+                         attr.payload_type(),
+                         a.payload_start,
+                         a.payload_end);
+                a.sub_attributes = Some(self.parse_attrs(a.payload_start, a.payload_end));
+            }
+
+            attrs.insert(attr.payload_type(), a);
+            start += nl_align_length(attr.payload_length());
+        }
+
+        attrs
+    }
+
+    fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Option<(T, usize)> {
+        if (limit - start) < mem::size_of::<T>() {
             // Not enough byte available
             return None;
         }
 
         let (prefix, header, suffix) =
-            unsafe { self.msg.inner[self.pos..self.pos + mem::size_of::<T>()].align_to::<T>() };
+            unsafe { self.msg.inner[start..start+ mem::size_of::<T>()].align_to::<T>() };
         // The buffer is aligned to 4 bytes, prefix and suffix must be empty :
         assert_eq!(prefix.len(), 0);
         assert_eq!(suffix.len(), 0);
         assert_eq!(header.len(), 1);
-        self.pos += nl_size_of_aligned::<T>();
-        Some(header[0])
+        Some((header[0], nl_size_of_aligned::<T>()))
     }
 }
 
 impl MsgPart {
     pub fn get_attr_bytes<'a>(&self, buffer: &'a MsgBuffer, attr_id: u32) -> Option<&'a [u8]> {
-        let (start, end) = self.attrs.get(&(attr_id as u16))?;
-        Some(&buffer.inner[*start..*end])
+        let attr = self.attrs.get(&(attr_id as u16))?;
+        Some(&buffer.inner[attr.payload_start..attr.payload_end])
     }
 
     pub fn get_attr<T: FromAttr>(&self, buffer: &MsgBuffer, attr_id: u32) -> Option<T> {
@@ -135,20 +189,20 @@ impl<'a> IntoIterator for &'a MsgBuffer {
     type IntoIter = PartIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        PartIterator { pos: 0, msg: self, current_msg_limit: self.size }
+        PartIterator { pos: 0, msg: self }
     }
 }
 
 impl<'a> Iterator for PartIterator<'a> {
     type Item = Result<MsgPart>;
     fn next(&mut self) -> Option<Self::Item> {
-        // Before reading the header we don't know where this message's limit is, set it to the
-        // total buffer size :
-        self.current_msg_limit = self.msg.size;
-        let available_size = self.current_msg_limit - self.pos;
+        let available_size = self.msg.size - self.pos;
         let starting_pos = self.pos;
         println!("Total available size : {}", available_size);
-        let header = self.deserialize::<nlmsghdr>()?;
+        // Before reading the header we don't know where this message's limit is, so we use the
+        // total buffer size.
+        let (header, size) = self.deserialize::<nlmsghdr>(self.pos, self.msg.size)?;
+        self.pos += size;
         if (header.nlmsg_flags as u32 & NLM_F_MULTI) == NLM_F_MULTI {
             println!("We got ourselves some multipart stuff");
         }
@@ -163,17 +217,14 @@ impl<'a> Iterator for PartIterator<'a> {
             )));
         }
 
-        self.current_msg_limit = starting_pos + header.nlmsg_len as usize;
+        let current_msg_limit = starting_pos + header.nlmsg_len as usize;
         // println!("Received nl header : {:?}", header);
         if header.nlmsg_type == self.msg.family_id {
-            let gen_header = self.deserialize::<genlmsghdr>()?;
-            let mut attrs = HashMap::new();
-            // println!("Received gen header : {:?}", gen_header);
-            while let Some(attr) = self.deserialize::<nlattr>() {
-                attrs.insert(attr.nla_type, (self.pos, self.pos + attr.payload_length()));
-                self.pos += nl_align_length(attr.payload_length());
-            }
-
+            let (gen_header, size) = self.deserialize::<genlmsghdr>(self.pos, current_msg_limit)?;
+            self.pos += size;
+            let attrs = self.parse_attrs(self.pos, current_msg_limit); 
+            // parse_attrs will loop until current_msg_limit is reached
+            self.pos = current_msg_limit; 
             Some(Ok(MsgPart {
                 attrs,
                 header,
