@@ -3,7 +3,7 @@ mod netlink;
 use std::os::fd::AsRawFd;
 
 use nix::sys::socket::{
-    bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType
+    bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 
 fn main() {
@@ -16,6 +16,6 @@ fn main() {
     .unwrap();
 
     bind(s.as_raw_fd(), &NetlinkAddr::new(0, 0)).unwrap();
-    netlink::get_family_info(netlink::WG_GENL_NAME, s);
-
+    let fid = netlink::get_family_id(netlink::WG_GENL_NAME, &s).unwrap();
+    println!("Familly id : {}", fid);
 }
