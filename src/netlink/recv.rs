@@ -1,10 +1,9 @@
 use nix::sys::socket::{recvfrom, NetlinkAddr};
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind, Result};
 use std::mem;
 use std::os::fd::AsRawFd;
 
-use super::bindings::{self, genlmsghdr, nl_size_of_aligned, nl_align_length, nlattr, nlmsghdr};
+use super::bindings::{self, genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr};
 
 pub trait FromAttr: Sized {
     fn from_attr(buffer: &[u8]) -> Option<Self>;
@@ -32,10 +31,16 @@ impl FromAttr for u16 {
 }
 
 #[derive(Debug)]
+pub enum AttributeType {
+    Nested(u32),
+    Raw(u32),
+}
+
+#[derive(Debug)]
 pub struct Attribute {
     payload_start: usize,
     payload_end: usize,
-    pub sub_attributes: Option<HashMap<u16, Attribute>>,
+    pub attribute_type: AttributeType,
 }
 
 impl Attribute {
@@ -43,42 +48,10 @@ impl Attribute {
         Attribute {
             payload_start: start,
             payload_end: start + attr.payload_length(),
-            sub_attributes: None,
-        }
-    }
-
-    pub fn get_attr_bytes<'a>(&self, buffer: &'a MsgBuffer, attr_id: u32) -> Option<&'a [u8]> {
-        let attr = self.sub_attributes.as_ref()?.get(&(attr_id as u16))?;
-        Some(&buffer.inner[attr.payload_start..attr.payload_end])
-    }
-
-    pub fn get_attr<T: FromAttr>(&self, buffer: &MsgBuffer, attr_id: u32) -> Option<T> {
-        T::from_attr(self.get_attr_bytes(buffer, attr_id)?)
-    }
-}
-
-#[derive(Debug)]
-pub enum AttributeType {
-    Nested(u32),
-    Raw(u32),
-}
-
-#[derive(Debug)]
-pub struct Attribute2 {
-    payload_start: usize,
-    payload_end: usize,
-    pub attribute_type: AttributeType,
-}
-
-impl Attribute2 {
-    fn new(attr: bindings::nlattr, start: usize) -> Self {
-        Attribute2 {
-            payload_start: start,
-            payload_end: start + attr.payload_length(),
             attribute_type: match attr.is_nested() {
                 true => AttributeType::Nested(attr.payload_type() as u32),
                 false => AttributeType::Raw(attr.payload_type() as u32),
-            }
+            },
         }
     }
 
@@ -98,41 +71,23 @@ pub struct AttributeIterator<'a> {
 }
 
 impl<'a> Iterator for AttributeIterator<'a> {
-    type Item = Attribute2;
+    type Item = Attribute;
     fn next(&mut self) -> Option<Self::Item> {
-        let (attr, new_pos) = self.deserialize::<nlattr>(self.pos, self.end)?;
+        let (attr, new_pos) = self.msg.deserialize::<nlattr>(self.pos, self.end)?;
         if new_pos + nl_align_length(attr.payload_length()) as usize > self.end {
-            panic!("Attribute {:?} payload is bigger than buffer size from {} to {}",
-                   attr,
-                   new_pos,
-                   self.end);
+            panic!(
+                "Attribute {:?} payload is bigger than buffer size from {} to {}",
+                attr, new_pos, self.end
+            );
         }
 
         self.pos = new_pos + nl_align_length(attr.payload_length());
-        Some(Attribute2::new(attr, new_pos))
-    }
-}
-
-impl AttributeIterator<'_> {
-    fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Option<(T, usize)> {
-        if start + nl_size_of_aligned::<T>() > limit {
-            // Not enough bytes available to decode the header
-            return None;
-        }
-
-        let (prefix, header, suffix) =
-            unsafe { self.msg.inner[start..start + mem::size_of::<T>()].align_to::<T>() };
-        // The buffer is aligned to 4 bytes, prefix and suffix must be empty :
-        assert_eq!(prefix.len(), 0);
-        assert_eq!(suffix.len(), 0);
-        assert_eq!(header.len(), 1);
-        Some((header[0], start + nl_size_of_aligned::<T>()))
+        Some(Attribute::new(attr, new_pos))
     }
 }
 
 #[derive(Debug)]
 pub struct MsgPart<'a> {
-    pub attrs: HashMap<u16, Attribute>,
     pub header: nlmsghdr,
     pub gen_header: genlmsghdr,
     attributes_start: usize,
@@ -141,15 +96,6 @@ pub struct MsgPart<'a> {
 }
 
 impl MsgPart<'_> {
-    pub fn get_attr_bytes<'a>(&self, buffer: &'a MsgBuffer, attr_id: u32) -> Option<&'a [u8]> {
-        let attr = self.attrs.get(&(attr_id as u16))?;
-        Some(&buffer.inner[attr.payload_start..attr.payload_end])
-    }
-
-    pub fn get_attr<T: FromAttr>(&self, buffer: &MsgBuffer, attr_id: u32) -> Option<T> {
-        T::from_attr(self.get_attr_bytes(buffer, attr_id)?)
-    }
-
     pub fn attributes(&self) -> AttributeIterator<'_> {
         AttributeIterator {
             pos: self.attributes_start,
@@ -164,49 +110,11 @@ pub struct PartIterator<'a> {
     msg: &'a MsgBuffer,
 }
 
-impl<'a> PartIterator<'a> {
-    fn parse_attrs(&self, mut start: usize, limit: usize) -> HashMap<u16, Attribute> {
-        let mut attrs = HashMap::new();
-        while let Some((attr, pos)) = self.deserialize::<nlattr>(start, limit) {
-            start += pos;
-            let mut a = Attribute::new(attr, start);
-            if attr.is_nested() {
-                a.sub_attributes = Some(self.parse_attrs(a.payload_start, a.payload_end));
-            }
-
-            attrs.insert(attr.payload_type(), a);
-            start += nl_align_length(attr.payload_length());
-        }
-
-        attrs
-    }
-
-    fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Option<(T, usize)> {
-        if (limit - start) < mem::size_of::<T>() {
-            // Not enough byte available
-            return None;
-        }
-
-        let (prefix, header, suffix) =
-            unsafe { self.msg.inner[start..start + mem::size_of::<T>()].align_to::<T>() };
-        // The buffer is aligned to 4 bytes, prefix and suffix must be empty :
-        assert_eq!(prefix.len(), 0);
-        assert_eq!(suffix.len(), 0);
-        assert_eq!(header.len(), 1);
-        Some((header[0], nl_size_of_aligned::<T>()))
-    }
-}
-
 impl<'a> Iterator for PartIterator<'a> {
     type Item = Result<MsgPart<'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         let available_size = self.msg.size - self.pos;
-        let starting_pos = self.pos;
-        println!("Total available size : {}", available_size);
-        // Before reading the header we don't know where this message's limit is, so we use the
-        // total buffer size.
-        let (header, size) = self.deserialize::<nlmsghdr>(self.pos, self.msg.size)?;
-        self.pos += size;
+        let (header, new_pos) = self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size)?;
         if (header.nlmsg_flags as u32 & bindings::NLM_F_MULTI) == bindings::NLM_F_MULTI {
             println!("We got ourselves some multipart stuff");
         }
@@ -221,21 +129,18 @@ impl<'a> Iterator for PartIterator<'a> {
             )));
         }
 
-        let current_msg_limit = starting_pos + header.nlmsg_len as usize;
-        // println!("Received nl header : {:?}", header);
+        let current_msg_limit = self.pos + header.nlmsg_len as usize;
+        self.pos = new_pos; // position after the nlmsghdr
         if header.nlmsg_type == self.msg.family_id {
-            let (gen_header, size) = self.deserialize::<genlmsghdr>(self.pos, current_msg_limit)?;
-            self.pos += size;
-            let attrs = self.parse_attrs(self.pos, current_msg_limit);
-            // parse_attrs will loop until current_msg_limit is reached
-            let attributes_start = self.pos;
+            let (gen_header, new_pos) = self
+                .msg
+                .deserialize::<genlmsghdr>(self.pos, current_msg_limit)?;
             self.pos = current_msg_limit;
             Some(Ok(MsgPart {
-                attrs,
                 header,
                 gen_header,
-                attributes_start,
-                attributes_end: current_msg_limit,
+                attributes_start: new_pos, // position after the genlmsghdr
+                attributes_end: current_msg_limit, // end of the current msg part
                 msg: self.msg,
             }))
         } else if header.nlmsg_type == bindings::NLMSG_ERROR as u16 {
@@ -285,6 +190,23 @@ impl MsgBuffer {
         */
 
         buf
+    }
+
+    /// Returns a copy of the internal buffer[start..size_of::<T>] transmutted into the type T
+    /// Returns None if the internal buffer doesn't have enough bytes left for T
+    fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Option<(T, usize)> {
+        if start + nl_size_of_aligned::<T>() > limit {
+            // Not enough bytes available to decode the header
+            return None;
+        }
+
+        let (prefix, header, suffix) =
+            unsafe { self.inner[start..start + mem::size_of::<T>()].align_to::<T>() };
+        // The buffer is aligned to 4 bytes, prefix and suffix must be empty :
+        assert_eq!(prefix.len(), 0);
+        assert_eq!(suffix.len(), 0);
+        assert_eq!(header.len(), 1);
+        Some((header[0], start + nl_size_of_aligned::<T>()))
     }
 
     pub fn recv<T: AsRawFd>(&mut self, fd: &T) -> Result<()> {

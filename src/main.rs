@@ -1,6 +1,6 @@
 mod netlink;
 
-use netlink::{AttributeType, wg_cmd, wgdevice_attribute};
+use netlink::{wg_cmd, wgdevice_attribute, AttributeType};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
@@ -34,7 +34,7 @@ fn main() {
                 AttributeType::Raw(wgdevice_attribute::WGDEVICE_A_IFNAME) => {
                     let ifname = attribute.get_bytes(&buffer).unwrap();
                     println!("Ifname : {:?}", CStr::from_bytes_with_nul(ifname).unwrap());
-                },
+                }
                 AttributeType::Nested(at) => println!("Nested attribute {}", at),
                 AttributeType::Raw(_) => (),
             }

@@ -25,9 +25,12 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     for mb_msg in &buffer {
         let msg = mb_msg?;
         // println!("Msg header {:?}", msg.header);
-        match msg.get_attr::<u16>(&buffer, bindings::CTRL_ATTR_FAMILY_ID) {
-            Some(id) => fid = id,
+        match msg.attributes().find_map(|att| match att.attribute_type {
+            AttributeType::Raw(bindings::CTRL_ATTR_FAMILY_ID) => att.get::<u16>(&buffer),
+            _ => None,
+        }) {
             None => continue,
+            Some(att) => fid = att,
         }
     }
 

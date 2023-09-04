@@ -1,4 +1,6 @@
-use super::bindings::{genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr, NLM_F_DUMP};
+use super::bindings::{
+    genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr, NLM_F_DUMP,
+};
 use nix::sys::socket::{sendto, MsgFlags, NetlinkAddr};
 use std::io::Result;
 use std::mem;
