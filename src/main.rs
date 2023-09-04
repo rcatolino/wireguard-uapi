@@ -1,10 +1,12 @@
 mod netlink;
+mod wireguard;
 
 use netlink::{wg_cmd, wgdevice_attribute, AttributeType};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 use std::{ffi::CStr, os::fd::AsRawFd};
+use wireguard::Peer;
 
 fn main() {
     let s = socket(
@@ -32,8 +34,15 @@ fn main() {
         for attribute in msg.attributes() {
             match attribute.attribute_type {
                 AttributeType::Raw(wgdevice_attribute::WGDEVICE_A_IFNAME) => {
-                    let ifname = attribute.get_bytes(&buffer).unwrap();
+                    let ifname = attribute.get_bytes().unwrap();
                     println!("Ifname : {:?}", CStr::from_bytes_with_nul(ifname).unwrap());
+                }
+                AttributeType::Nested(wgdevice_attribute::WGDEVICE_A_PEERS) => {
+                    println!("Nested attribute peers :");
+                    for peer_attr in attribute.attributes().map(|p| p.attributes()) {
+                        let p = Peer::new(peer_attr);
+                        println!("New peer : {:?}", p);
+                    }
                 }
                 AttributeType::Nested(at) => println!("Nested attribute {}", at),
                 AttributeType::Raw(_) => (),

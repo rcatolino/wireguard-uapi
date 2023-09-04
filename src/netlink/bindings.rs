@@ -6,7 +6,6 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use super::bindings;
 use std::mem;
 
 pub const fn nl_size_of_aligned<T>() -> usize {
@@ -39,7 +38,7 @@ impl nlmsghdr {
         nlmsghdr {
             nlmsg_len: 0,
             nlmsg_type: family,
-            nlmsg_flags: (bindings::NLM_F_REQUEST | bindings::NLM_F_ACK) as u16,
+            nlmsg_flags: (NLM_F_REQUEST | NLM_F_ACK) as u16,
             nlmsg_seq: seq,
             nlmsg_pid: 0,
         }

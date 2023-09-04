@@ -1,7 +1,7 @@
 use nix::sys::socket::{recvfrom, NetlinkAddr};
 use std::io::{Error, ErrorKind, Result};
-use std::mem;
 use std::os::fd::AsRawFd;
+use std::{fmt, mem};
 
 use super::bindings::{self, genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr};
 
@@ -30,21 +30,41 @@ impl FromAttr for u16 {
     }
 }
 
+impl FromAttr for u8 {
+    fn from_attr(buffer: &[u8]) -> Option<Self> {
+        let buf = buffer[0..1].try_into().ok()?;
+        Some(u8::from_le_bytes(buf))
+    }
+}
+
 #[derive(Debug)]
 pub enum AttributeType {
     Nested(u32),
     Raw(u32),
 }
 
-#[derive(Debug)]
-pub struct Attribute {
+pub struct Attribute<'a> {
     payload_start: usize,
     payload_end: usize,
     pub attribute_type: AttributeType,
+    msg: &'a MsgBuffer,
 }
 
-impl Attribute {
-    fn new(attr: bindings::nlattr, start: usize) -> Self {
+impl<'a> fmt::Debug for Attribute<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Attribute {:?}, {}->{} : {:?}",
+            self.attribute_type,
+            self.payload_start,
+            self.payload_end,
+            self.get_bytes()
+        )
+    }
+}
+
+impl<'a> Attribute<'a> {
+    fn new(attr: bindings::nlattr, start: usize, msg: &'a MsgBuffer) -> Self {
         Attribute {
             payload_start: start,
             payload_end: start + attr.payload_length(),
@@ -52,15 +72,33 @@ impl Attribute {
                 true => AttributeType::Nested(attr.payload_type() as u32),
                 false => AttributeType::Raw(attr.payload_type() as u32),
             },
+            msg,
         }
     }
 
-    pub fn get_bytes<'a>(&self, buffer: &'a MsgBuffer) -> Option<&'a [u8]> {
-        Some(&buffer.inner[self.payload_start..self.payload_end])
+    pub fn get_bytes(&self) -> Option<&'a [u8]> {
+        Some(&self.msg.inner[self.payload_start..self.payload_end])
     }
 
-    pub fn get<T: FromAttr>(&self, buffer: &MsgBuffer) -> Option<T> {
-        T::from_attr(self.get_bytes(buffer)?)
+    pub fn get<T: FromAttr>(&self) -> Option<T> {
+        T::from_attr(self.get_bytes()?)
+    }
+
+    /// Returns an iterator over the sub-attributes.
+    /// If the current attribute is not nested, the iterator will only yield None
+    pub fn attributes(&self) -> AttributeIterator<'a> {
+        match self.attribute_type {
+            AttributeType::Raw(_) => AttributeIterator {
+                pos: 0,
+                end: 0,
+                msg: self.msg,
+            },
+            AttributeType::Nested(_) => AttributeIterator {
+                pos: self.payload_start,
+                end: self.payload_end,
+                msg: self.msg,
+            },
+        }
     }
 }
 
@@ -71,7 +109,7 @@ pub struct AttributeIterator<'a> {
 }
 
 impl<'a> Iterator for AttributeIterator<'a> {
-    type Item = Attribute;
+    type Item = Attribute<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         let (attr, new_pos) = self.msg.deserialize::<nlattr>(self.pos, self.end)?;
         if new_pos + nl_align_length(attr.payload_length()) as usize > self.end {
@@ -82,7 +120,7 @@ impl<'a> Iterator for AttributeIterator<'a> {
         }
 
         self.pos = new_pos + nl_align_length(attr.payload_length());
-        Some(Attribute::new(attr, new_pos))
+        Some(Attribute::new(attr, new_pos, self.msg))
     }
 }
 

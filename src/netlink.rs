@@ -5,8 +5,10 @@ mod send;
 use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 
-pub use bindings::{wg_cmd, wgdevice_attribute, WG_GENL_NAME};
-pub use recv::{AttributeType, MsgBuffer};
+pub use bindings::{
+    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, WG_GENL_NAME,
+};
+pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer};
 pub use send::MsgBuilder;
 
 pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
@@ -26,7 +28,7 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
         let msg = mb_msg?;
         // println!("Msg header {:?}", msg.header);
         match msg.attributes().find_map(|att| match att.attribute_type {
-            AttributeType::Raw(bindings::CTRL_ATTR_FAMILY_ID) => att.get::<u16>(&buffer),
+            AttributeType::Raw(bindings::CTRL_ATTR_FAMILY_ID) => att.get::<u16>(),
             _ => None,
         }) {
             None => continue,
