@@ -1,6 +1,6 @@
 mod netlink;
 
-use netlink::{wg_cmd, wgdevice_attribute};
+use netlink::{AttributeType, wg_cmd, wgdevice_attribute};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
@@ -29,24 +29,15 @@ fn main() {
     for mb_msg in &buffer {
         let msg = mb_msg.unwrap();
         println!("Msg header {:?}", msg.header);
-        let ifname = msg
-            .get_attr_bytes(&buffer, wgdevice_attribute::WGDEVICE_A_IFNAME)
-            .unwrap();
-        println!("Ifname : {:?}", CStr::from_bytes_with_nul(ifname).unwrap());
-        /*
-        let peers = msg.get_attr_bytes(&buffer, wgdevice_attribute::WGDEVICE_A_PEERS).unwrap();
-        println!("Peers : {:?}", peers);
-        */
-        let peers = msg
-            .attrs
-            .get(&(wgdevice_attribute::WGDEVICE_A_PEERS as u16))
-            .unwrap();
-        println!("{:?}", peers.sub_attributes);
-        /*
-        for (a_type, attr) in peers.sub_attributes.as_ref().unwrap().iter() {
-            let payload = buffer.inner[attr.payload_start..attr.payload_end];
-            println!("{} : {:?}", a_type, payload);
+        for attribute in msg.attributes() {
+            match attribute.attribute_type {
+                AttributeType::Raw(wgdevice_attribute::WGDEVICE_A_IFNAME) => {
+                    let ifname = attribute.get_bytes(&buffer).unwrap();
+                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(ifname).unwrap());
+                },
+                AttributeType::Nested(at) => println!("Nested attribute {}", at),
+                AttributeType::Raw(_) => (),
+            }
         }
-        */
     }
 }

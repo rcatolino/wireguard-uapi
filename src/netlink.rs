@@ -6,7 +6,7 @@ use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 
 pub use bindings::{wg_cmd, wgdevice_attribute, WG_GENL_NAME};
-pub use recv::MsgBuffer;
+pub use recv::{AttributeType, MsgBuffer};
 pub use send::MsgBuilder;
 
 pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
