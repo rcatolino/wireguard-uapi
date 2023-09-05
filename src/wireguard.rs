@@ -1,20 +1,12 @@
 use nix::libc::{sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 
 use crate::netlink::{
-    wgallowedip_attribute, wgpeer_attribute, Attribute, AttributeIterator, AttributeType,
+    wgallowedip_attribute, wgpeer_attribute, Attribute, AttributeIterator, AttributeType, NestBuilder, NlSerializer, MsgBuilder,
 };
 use std::{
     mem::size_of,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
-
-#[derive(Debug)]
-pub struct Peer {
-    pub peer_key: Vec<u8>,
-    pub endpoint: (IpAddr, u16),
-    pub allowed_ips: Vec<(IpAddr, u8)>,
-    pub keepalive: Option<u16>,
-}
 
 fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
     if bytes.len() == size_of::<sockaddr_in6>() {
@@ -93,6 +85,14 @@ fn parse_allowed_ip(ip_attr: Attribute<'_>) -> Option<(IpAddr, u8)> {
     Some((ip, mask?))
 }
 
+#[derive(Debug)]
+pub struct Peer {
+    pub peer_key: Vec<u8>,
+    pub endpoint: (IpAddr, u16),
+    pub allowed_ips: Vec<(IpAddr, u8)>,
+    pub keepalive: Option<u16>,
+}
+
 impl Peer {
     pub fn new(attributes: AttributeIterator<'_>) -> Option<Self> {
         let mut peer_key = Vec::new();
@@ -124,5 +124,14 @@ impl Peer {
             allowed_ips,
             keepalive,
         })
+    }
+}
+
+impl NestBuilder<MsgBuilder> {
+    pub fn set_peer(self, peer: &Peer) -> Self {
+        self.attr_list_start(0)
+            .attr_bytes(wgpeer_attribute::WGPEER_A_PUBLIC_KEY as u16, peer.peer_key.as_slice())
+            .attr_bytes(wgpeer_attribute::WGPEER_A_ENDPOINT as u16, peer.peer_key.as_slice())
+            .attr_list_end()
     }
 }

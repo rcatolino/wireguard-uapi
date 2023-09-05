@@ -8,6 +8,8 @@ use nix::sys::socket::{
 use std::{ffi::CStr, os::fd::AsRawFd};
 use wireguard::Peer;
 
+use crate::netlink::NlSerializer;
+
 fn main() {
     let s = socket(
         AddressFamily::Netlink,
@@ -28,6 +30,7 @@ fn main() {
     get_dev_cmd.sendto(&s).unwrap();
     let mut buffer = netlink::MsgBuffer::new(fid);
     buffer.recv(&s).unwrap();
+    let mut mod_peer = None;
     for mb_msg in &buffer {
         let msg = mb_msg.unwrap();
         println!("Msg header {:?}", msg.header);
@@ -42,6 +45,9 @@ fn main() {
                     for peer_attr in attribute.attributes().map(|p| p.attributes()) {
                         let p = Peer::new(peer_attr);
                         println!("New peer : {:?}", p);
+                        if p.is_some() {
+                            mod_peer = p;
+                        }
                     }
                 }
                 AttributeType::Nested(at) => println!("Nested attribute {}", at),
@@ -49,4 +55,10 @@ fn main() {
             }
         }
     }
+
+    netlink::MsgBuilder::new(fid, 3, wg_cmd::WG_CMD_SET_DEVICE as u8)
+        .attr_list_start(wgdevice_attribute::WGDEVICE_A_PEERS as u16)
+        .set_peer(mod_peer.as_ref().unwrap())
+        .attr_list_end()
+        .sendto(&s).unwrap();
 }
