@@ -1,10 +1,12 @@
 use nix::libc::{sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 
 use crate::netlink::{
-    wgallowedip_attribute, wgpeer_attribute, Attribute, AttributeIterator, AttributeType, NestBuilder, NlSerializer, MsgBuilder,
+    wgallowedip_attribute, wgpeer_attribute, Attribute, AttributeIterator, AttributeType,
+    MsgBuilder, NestBuilder, NlSerializer,
 };
+use core::slice;
 use std::{
-    mem::size_of,
+    mem::{self, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
@@ -16,7 +18,7 @@ fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
         assert_eq!(sock[0].sin6_family as i32, AF_INET6);
         Some((
             IpAddr::V6(Ipv6Addr::from(sock[0].sin6_addr.s6_addr)),
-            sock[0].sin6_port,
+            u16::from_be(sock[0].sin6_port),
         ))
     } else if bytes.len() == size_of::<sockaddr_in>() {
         // ipv4
@@ -24,8 +26,8 @@ fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
         assert_eq!(sock.len(), 1);
         assert_eq!(sock[0].sin_family as i32, AF_INET);
         Some((
-            IpAddr::V4(Ipv4Addr::from(sock[0].sin_addr.s_addr)),
-            sock[0].sin_port,
+            IpAddr::V4(Ipv4Addr::from(u32::from_be(sock[0].sin_addr.s_addr))),
+            u16::from_be(sock[0].sin_port),
         ))
     } else {
         println!(
@@ -127,11 +129,62 @@ impl Peer {
     }
 }
 
+impl<T: NlSerializer> NestBuilder<T> {
+    fn attr_endpoint(self, attr_type: u16, endpoint: (IpAddr, u16)) -> Self {
+        match endpoint {
+            (IpAddr::V4(ipv4), port) => {
+                let s = sockaddr_in {
+                    sin_family: AF_INET as u16,
+                    sin_port: port.to_be(),
+                    sin_addr: nix::libc::in_addr {
+                        s_addr: u32::from(ipv4).to_be(),
+                    },
+                    sin_zero: [0u8; 8],
+                };
+
+                unsafe {
+                    let buf = slice::from_raw_parts(
+                        (&s as *const sockaddr_in) as *const u8,
+                        mem::size_of::<sockaddr_in>(),
+                    );
+                    self.attr_bytes(attr_type, buf)
+                }
+
+            }
+            (IpAddr::V6(ipv6), port) => {
+                let s = sockaddr_in6 {
+                    sin6_family: AF_INET6 as u16,
+                    sin6_port: port.to_be(),
+                    sin6_flowinfo: 0,
+                    sin6_addr: nix::libc::in6_addr {
+                        s6_addr: ipv6.octets(),
+                    },
+                    sin6_scope_id: 0,
+                };
+
+                unsafe {
+                    let buf = slice::from_raw_parts(
+                        (&s as *const sockaddr_in6) as *const u8,
+                        mem::size_of::<sockaddr_in6>(),
+                    );
+                    self.attr_bytes(attr_type, buf)
+                }
+            }
+        }
+    }
+}
+
 impl NestBuilder<MsgBuilder> {
     pub fn set_peer(self, peer: &Peer) -> Self {
         self.attr_list_start(0)
-            .attr_bytes(wgpeer_attribute::WGPEER_A_PUBLIC_KEY as u16, peer.peer_key.as_slice())
-            .attr_bytes(wgpeer_attribute::WGPEER_A_ENDPOINT as u16, peer.peer_key.as_slice())
+            .attr_bytes(
+                wgpeer_attribute::WGPEER_A_PUBLIC_KEY as u16,
+                peer.peer_key.as_slice(),
+            )
+            .attr_endpoint(
+                wgpeer_attribute::WGPEER_A_ENDPOINT as u16,
+                peer.endpoint
+            )
             .attr_list_end()
     }
 }

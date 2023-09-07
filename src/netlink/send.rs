@@ -1,5 +1,5 @@
 use super::bindings::{
-    genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr, NLM_F_DUMP,
+    genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr, NLA_F_NESTED, NLM_F_DUMP,
 };
 use nix::sys::socket::{sendto, MsgFlags, NetlinkAddr};
 use std::io::Result;
@@ -24,17 +24,18 @@ macro_rules! copy_to_slice (
 );
 
 pub trait ToAttr: Sized {
-    fn serialize_at(self, out: &mut [u8], pos: usize);
+    fn serialize_at(self, out: &mut [u8], pos: usize) -> usize;
 }
 
 impl ToAttr for () {
-    fn serialize_at(self, _out: &mut [u8], _pos: usize) { }
+    fn serialize_at(self, _out: &mut [u8], _pos: usize) -> usize { 0 }
 }
 
 impl ToAttr for u32 {
-    fn serialize_at(self, out: &mut [u8], pos: usize) {
+    fn serialize_at(self, out: &mut [u8], pos: usize) -> usize {
         let tlen = mem::size_of::<Self>();
         out[pos..pos + tlen].copy_from_slice(&self.to_le_bytes());
+        nl_align_length(tlen)
     }
 }
 
@@ -43,15 +44,20 @@ pub trait NlSerializer {
     fn attr_bytes(self, attr_type: u16, payload: &[u8]) -> Self;
     fn pos(&self) -> usize;
     fn seek(&mut self, len: usize);
-    fn buffer(&mut self) -> &mut[u8];
-    fn attr_list_start(mut self, attr_type: u16) -> NestBuilder<Self> where Self: Sized{
-        let attr_header_size = nl_size_of_aligned::<nlattr>();
+    fn buffer(&mut self) -> &mut [u8];
+    fn attr_list_start(mut self, attr_type: u16) -> NestBuilder<Self>
+    where
+        Self: Sized,
+    {
         let start_pos = self.pos();
-        self.seek(nl_align_length(attr_header_size));
+        self.seek(nl_align_length(nl_size_of_aligned::<nlattr>()));
         let new_builder = NestBuilder {
             upper: self,
             start_pos,
-            start_attr: nlattr { nla_len: attr_header_size as u16, nla_type: attr_type },
+            start_attr: nlattr {
+                nla_len: 0, // This will be set in attr_list_end, where we know the payload size
+                nla_type: attr_type | NLA_F_NESTED as u16,
+            },
         };
 
         new_builder
@@ -75,7 +81,7 @@ impl<U: NlSerializer> NlSerializer for NestBuilder<U> {
         self
     }
 
-    fn buffer(&mut self) -> &mut[u8] {
+    fn buffer(&mut self) -> &mut [u8] {
         self.upper.buffer()
     }
 
@@ -90,18 +96,27 @@ impl<U: NlSerializer> NlSerializer for NestBuilder<U> {
 
 impl<U: NlSerializer> NestBuilder<U> {
     pub fn attr_list_end(mut self) -> U {
-        self.start_attr.nla_len += (self.pos() - self.start_pos) as u16;
-        let mut copy_size = 0;
-        copy_to_slice!(self.buffer(), copy_size, self.start_attr, nlattr);
-        self.seek(copy_size);
+        self.start_attr.nla_len = (self.pos() - self.start_pos) as u16;
+        let mut copy_at = self.start_pos;
+        copy_to_slice!(self.buffer(), copy_at, self.start_attr, nlattr);
+        println!(
+            "Commiting nested attribute {} from {} to {} ({} bytes). Buffer pos : {}",
+            self.start_attr.payload_type(),
+            self.start_pos,
+            copy_at,
+            self.start_attr.nla_len,
+            self.pos(),
+        );
+
+        // self.seek(copy_size);
         self.upper
     }
 }
 
 pub struct MsgBuilder {
     pub inner: [u8; 2048],
-    header: nlmsghdr,
-    gen_header: genlmsghdr,
+    pub header: nlmsghdr,
+    pub gen_header: genlmsghdr,
     pub pos: usize,
 }
 
@@ -128,8 +143,7 @@ impl NlSerializer for MsgBuilder {
         };
 
         copy_to_slice!(self.inner, self.pos, attr, nlattr);
-        payload.serialize_at(&mut self.inner, self.pos);
-        self.pos += nl_align_length(tlen); // The next attr header must be aligned
+        self.pos += payload.serialize_at(&mut self.inner, self.pos);
         self
     }
 
@@ -141,7 +155,7 @@ impl NlSerializer for MsgBuilder {
         self.pos += len;
     }
 
-    fn buffer(&mut self) -> &mut[u8] {
+    fn buffer(&mut self) -> &mut [u8] {
         &mut self.inner
     }
 }
@@ -170,8 +184,13 @@ impl MsgBuilder {
         self.header.nlmsg_len = self.pos as u32;
         let mut header_pos = 0;
         copy_to_slice!(self.inner, header_pos, self.header, nlmsghdr);
+        println!(
+            "Sending Msg : {:?}. Gen header pos : {}",
+            self.header, header_pos
+        );
         copy_to_slice!(self.inner, header_pos, self.gen_header, genlmsghdr);
         assert_ne!(header_pos, 0); // just to remove the unused assignment warning
+        println!("Sending buffer : {:02x?}", &self.inner[..self.pos]);
         Ok(sendto(
             fd.as_raw_fd(),
             &self.inner[..self.pos],

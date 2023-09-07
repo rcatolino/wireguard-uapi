@@ -52,14 +52,28 @@ pub struct Attribute<'a> {
 
 impl<'a> fmt::Debug for Attribute<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Attribute {:?}, {}->{} : {:?}",
-            self.attribute_type,
-            self.payload_start,
-            self.payload_end,
-            self.get_bytes()
-        )
+        match self.attribute_type {
+            AttributeType::Nested(at) => {
+                writeln!(
+                    f,
+                    "Nested Attribute {}, {}->{}",
+                    at, self.payload_start, self.payload_end
+                )?;
+                for attr in self.attributes() {
+                    writeln!(f, "{:?}", attr)?;
+                }
+                write!(f, "Nested Attribute {} end", at)?;
+                Ok(())
+            }
+            AttributeType::Raw(at) => write!(
+                f,
+                "Attribute {}, {}->{} : {:02x?}",
+                at,
+                self.payload_start,
+                self.payload_end,
+                self.get_bytes()
+            ),
+        }
     }
 }
 
@@ -158,6 +172,11 @@ impl<'a> Iterator for PartIterator<'a> {
         }
 
         if header.nlmsg_len as usize > available_size {
+            println!(
+                "Error decoding message : {:?}",
+                &self.msg.inner[self.pos..self.msg.size]
+            );
+            self.pos = self.msg.size; // Set pos to end to prevent further iteration
             return Some(Err(Error::new(
                 ErrorKind::Other,
                 format!(
@@ -183,6 +202,7 @@ impl<'a> Iterator for PartIterator<'a> {
             }))
         } else if header.nlmsg_type == bindings::NLMSG_ERROR as u16 {
             let errno = i32::from_attr(&self.msg.inner[self.pos..self.pos + 4]).unwrap();
+            self.pos += mem::size_of_val(&errno);
             if errno < 0 {
                 println!("Received netlink error {}", errno);
                 Some(Err(Error::from_raw_os_error(errno)))

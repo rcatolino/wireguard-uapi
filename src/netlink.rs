@@ -9,7 +9,7 @@ pub use bindings::{
     wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, WG_GENL_NAME,
 };
 pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer};
-pub use send::{MsgBuilder, NestBuilder, NlSerializer};
+pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
 
 pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     let mut builder = MsgBuilder::new(

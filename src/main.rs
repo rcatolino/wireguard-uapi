@@ -45,8 +45,9 @@ fn main() {
                     for peer_attr in attribute.attributes().map(|p| p.attributes()) {
                         let p = Peer::new(peer_attr);
                         println!("New peer : {:?}", p);
-                        if p.is_some() {
-                            mod_peer = p;
+                        if let Some(mut peer) = p {
+                            peer.endpoint.1 = 2222;
+                            mod_peer = Some(peer);
                         }
                     }
                 }
@@ -56,9 +57,26 @@ fn main() {
         }
     }
 
+    println!("Re-setting peer : {:?}", mod_peer);
     netlink::MsgBuilder::new(fid, 3, wg_cmd::WG_CMD_SET_DEVICE as u8)
+        .attr(wgdevice_attribute::WGDEVICE_A_IFINDEX as u16, 19u32)
         .attr_list_start(wgdevice_attribute::WGDEVICE_A_PEERS as u16)
         .set_peer(mod_peer.as_ref().unwrap())
         .attr_list_end()
-        .sendto(&s).unwrap();
+        .sendto(&s)
+        .unwrap();
+
+    let mut buffer = netlink::MsgBuffer::new(fid);
+    buffer.recv(&s).unwrap();
+    for mb_msg in &buffer {
+        match mb_msg {
+            Err(e) => println!("Receive err resp : {:?}", e),
+            Ok(msg) => {
+                println!("Original request msg : {:?}", msg.header);
+                for attr in msg.attributes() {
+                    println!("{:?}", attr);
+                }
+            }
+        }
+    }
 }
