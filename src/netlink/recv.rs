@@ -126,7 +126,7 @@ impl<'a> Iterator for AttributeIterator<'a> {
     type Item = Attribute<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         let (attr, new_pos) = self.msg.deserialize::<nlattr>(self.pos, self.end)?;
-        if new_pos + nl_align_length(attr.payload_length()) as usize > self.end {
+        if new_pos + nl_align_length(attr.payload_length()) > self.end {
             panic!(
                 "Attribute {:?} payload is bigger than buffer size from {} to {}",
                 attr, new_pos, self.end
@@ -232,22 +232,11 @@ pub struct MsgBuffer {
 
 impl MsgBuffer {
     pub fn new(family_id: u16) -> Self {
-        let buf = MsgBuffer {
+        MsgBuffer {
             inner: [0u8; 2048],
             size: 0,
             family_id,
-        };
-
-        /*
-        println!(
-            "Alignment of recv buffer : {}, address {:?}, inner address {:?}",
-            mem::align_of_val(&buf),
-            (&buf) as *const MsgBuffer,
-            buf.inner.as_ptr()
-        );
-        */
-
-        buf
+        }
     }
 
     /// Returns a copy of the internal buffer[start..size_of::<T>] transmutted into the type T

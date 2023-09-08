@@ -1,8 +1,8 @@
-use nix::libc::{sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
+use nix::libc::{in_addr, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 
 use crate::netlink::{
-    wgallowedip_attribute, wgpeer_attribute, Attribute, AttributeIterator, AttributeType,
-    MsgBuilder, NestBuilder, NlSerializer,
+    wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
+    AttributeType, NestBuilder, NlSerializer,
 };
 use core::slice;
 use std::{
@@ -130,13 +130,46 @@ impl Peer {
 }
 
 impl<T: NlSerializer> NestBuilder<T> {
+    fn add_ip(mut self, ip: &IpAddr, mask: u8) -> Self {
+        // let ip_builder = self.attr_list_start(0);
+        self = match ip {
+            IpAddr::V4(ipv4) => self
+                .attr(
+                    wgallowedip_attribute::WGALLOWEDIP_A_FAMILY as u16,
+                    AF_INET as u16,
+                )
+                .attr_bytes(
+                    wgallowedip_attribute::WGALLOWEDIP_A_IPADDR as u16,
+                    &ipv4.octets(),
+                ),
+            IpAddr::V6(ipv6) => self
+                .attr(
+                    wgallowedip_attribute::WGALLOWEDIP_A_FAMILY as u16,
+                    AF_INET6 as u16,
+                )
+                .attr_bytes(
+                    wgallowedip_attribute::WGALLOWEDIP_A_IPADDR as u16,
+                    &ipv6.octets(),
+                ),
+        };
+
+        self.attr(wgallowedip_attribute::WGALLOWEDIP_A_CIDR_MASK as u16, mask)
+    }
+
+    fn set_allowed_ips(mut self, ips: &[(IpAddr, u8)]) -> Self {
+        for (ip, mask) in ips {
+            self = self.attr_list_start(0).add_ip(ip, *mask).attr_list_end();
+        }
+        self
+    }
+
     fn attr_endpoint(self, attr_type: u16, endpoint: (IpAddr, u16)) -> Self {
         match endpoint {
             (IpAddr::V4(ipv4), port) => {
                 let s = sockaddr_in {
                     sin_family: AF_INET as u16,
                     sin_port: port.to_be(),
-                    sin_addr: nix::libc::in_addr {
+                    sin_addr: in_addr {
                         s_addr: u32::from(ipv4).to_be(),
                     },
                     sin_zero: [0u8; 8],
@@ -149,7 +182,6 @@ impl<T: NlSerializer> NestBuilder<T> {
                     );
                     self.attr_bytes(attr_type, buf)
                 }
-
             }
             (IpAddr::V6(ipv6), port) => {
                 let s = sockaddr_in6 {
@@ -172,19 +204,36 @@ impl<T: NlSerializer> NestBuilder<T> {
             }
         }
     }
-}
 
-impl NestBuilder<MsgBuilder> {
-    pub fn set_peer(self, peer: &Peer) -> Self {
+    pub fn remove_peer(self, peer: &Peer) -> Self {
         self.attr_list_start(0)
+            .attr(
+                wgpeer_attribute::WGPEER_A_FLAGS as u16,
+                wgpeer_flag::WGPEER_F_REMOVE_ME as u32,
+            )
             .attr_bytes(
                 wgpeer_attribute::WGPEER_A_PUBLIC_KEY as u16,
                 peer.peer_key.as_slice(),
             )
-            .attr_endpoint(
-                wgpeer_attribute::WGPEER_A_ENDPOINT as u16,
-                peer.endpoint
-            )
             .attr_list_end()
+    }
+
+    pub fn set_peer(self, peer: &Peer) -> Self {
+        let mut attr_list = self.attr_list_start(0)
+            .attr_bytes(
+                wgpeer_attribute::WGPEER_A_PUBLIC_KEY as u16,
+                peer.peer_key.as_slice(),
+            )
+            .attr_endpoint(wgpeer_attribute::WGPEER_A_ENDPOINT as u16, peer.endpoint)
+            .attr_list_start(wgpeer_attribute::WGPEER_A_ALLOWEDIPS as u16)
+            .set_allowed_ips(&peer.allowed_ips)
+            .attr_list_end();
+
+        if let Some(keepalive) = peer.keepalive {
+            attr_list = attr_list.attr(wgpeer_attribute::WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL as u16,
+                           keepalive as u16);
+        }
+
+        attr_list.attr_list_end()
     }
 }

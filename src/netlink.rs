@@ -6,7 +6,7 @@ use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 
 pub use bindings::{
-    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, WG_GENL_NAME,
+    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, wgpeer_flag, WG_GENL_NAME,
 };
 pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer};
 pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};

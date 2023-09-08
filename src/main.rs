@@ -25,7 +25,7 @@ fn main() {
 
     let mut get_dev_cmd = netlink::MsgBuilder::new(fid, 2, wg_cmd::WG_CMD_GET_DEVICE as u8)
         .dump()
-        .attr(wgdevice_attribute::WGDEVICE_A_IFINDEX as u16, 19u32);
+        .attr(wgdevice_attribute::WGDEVICE_A_IFINDEX as u16, 21u32);
 
     get_dev_cmd.sendto(&s).unwrap();
     let mut buffer = netlink::MsgBuffer::new(fid);
@@ -59,7 +59,7 @@ fn main() {
 
     println!("Re-setting peer : {:?}", mod_peer);
     netlink::MsgBuilder::new(fid, 3, wg_cmd::WG_CMD_SET_DEVICE as u8)
-        .attr(wgdevice_attribute::WGDEVICE_A_IFINDEX as u16, 19u32)
+        .attr(wgdevice_attribute::WGDEVICE_A_IFINDEX as u16, 21u32)
         .attr_list_start(wgdevice_attribute::WGDEVICE_A_PEERS as u16)
         .set_peer(mod_peer.as_ref().unwrap())
         .attr_list_end()

@@ -28,7 +28,25 @@ pub trait ToAttr: Sized {
 }
 
 impl ToAttr for () {
-    fn serialize_at(self, _out: &mut [u8], _pos: usize) -> usize { 0 }
+    fn serialize_at(self, _out: &mut [u8], _pos: usize) -> usize {
+        0
+    }
+}
+
+impl ToAttr for u8 {
+    fn serialize_at(self, out: &mut [u8], pos: usize) -> usize {
+        let tlen = mem::size_of::<Self>();
+        out[pos..pos + tlen].copy_from_slice(&self.to_le_bytes());
+        nl_align_length(tlen)
+    }
+}
+
+impl ToAttr for u16 {
+    fn serialize_at(self, out: &mut [u8], pos: usize) -> usize {
+        let tlen = mem::size_of::<Self>();
+        out[pos..pos + tlen].copy_from_slice(&self.to_le_bytes());
+        nl_align_length(tlen)
+    }
 }
 
 impl ToAttr for u32 {
@@ -51,16 +69,14 @@ pub trait NlSerializer {
     {
         let start_pos = self.pos();
         self.seek(nl_align_length(nl_size_of_aligned::<nlattr>()));
-        let new_builder = NestBuilder {
+        NestBuilder {
             upper: self,
             start_pos,
             start_attr: nlattr {
                 nla_len: 0, // This will be set in attr_list_end, where we know the payload size
                 nla_type: attr_type | NLA_F_NESTED as u16,
             },
-        };
-
-        new_builder
+        }
     }
 }
 
