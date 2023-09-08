@@ -20,11 +20,11 @@ pub const fn nl_align_length(size: usize) -> usize {
 
 impl nlattr {
     pub fn is_nested(&self) -> bool {
-        (NLA_F_NESTED as u16 & self.nla_type) == NLA_F_NESTED as u16
+        (NLA_F_NESTED & self.nla_type) == NLA_F_NESTED
     }
 
     pub fn payload_type(&self) -> u16 {
-        const type_mask: u16 = !(NLA_F_NESTED as u16 | NLA_F_NET_BYTEORDER as u16);
+        const type_mask: u16 = !(NLA_F_NESTED | NLA_F_NET_BYTEORDER);
         self.nla_type & type_mask
     }
 
@@ -38,7 +38,7 @@ impl nlmsghdr {
         nlmsghdr {
             nlmsg_len: 0,
             nlmsg_type: family,
-            nlmsg_flags: (NLM_F_REQUEST | NLM_F_ACK) as u16,
+            nlmsg_flags: NLM_F_REQUEST | NLM_F_ACK,
             nlmsg_seq: seq,
             nlmsg_pid: 0,
         }

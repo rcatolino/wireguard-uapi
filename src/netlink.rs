@@ -13,7 +13,7 @@ pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
 
 pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     let mut builder = MsgBuilder::new(
-        bindings::GENL_ID_CTRL as u16,
+        bindings::GENL_ID_CTRL,
         1,
         bindings::CTRL_CMD_GETFAMILY as u8,
     )
@@ -21,7 +21,7 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     builder.sendto(fd)?;
 
     // Receive response :
-    let mut buffer = MsgBuffer::new(bindings::GENL_ID_CTRL as u16);
+    let mut buffer = MsgBuffer::new(bindings::GENL_ID_CTRL);
     buffer.recv(fd)?;
     let mut fid = 0;
     for mb_msg in &buffer {
@@ -37,7 +37,7 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     }
 
     // Receive error msg :
-    let mut buffer = MsgBuffer::new(bindings::GENL_ID_CTRL as u16);
+    let mut buffer = MsgBuffer::new(bindings::GENL_ID_CTRL);
     buffer.recv(fd)?;
 
     // We now know the family id !

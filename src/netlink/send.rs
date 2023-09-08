@@ -74,7 +74,7 @@ pub trait NlSerializer {
             start_pos,
             start_attr: nlattr {
                 nla_len: 0, // This will be set in attr_list_end, where we know the payload size
-                nla_type: attr_type | NLA_F_NESTED as u16,
+                nla_type: attr_type | NLA_F_NESTED,
             },
         }
     }
@@ -191,7 +191,7 @@ impl MsgBuilder {
     }
 
     pub fn dump(mut self) -> Self {
-        self.header.nlmsg_flags |= NLM_F_DUMP as u16;
+        self.header.nlmsg_flags |= NLM_F_DUMP;
         self
     }
 

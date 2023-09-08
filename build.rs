@@ -1,6 +1,43 @@
 use std::env;
 use std::path::PathBuf;
 
+use bindgen::callbacks::{EnumVariantValue, IntKind, ParseCallbacks};
+
+#[derive(Debug)]
+struct CustomParser();
+
+impl ParseCallbacks for CustomParser {
+    fn int_macro(&self, name: &str, _value: i64) -> Option<IntKind> {
+        if name.starts_with("NLA_F") || name.starts_with("NLM") || name.starts_with("GENL_ID") {
+            Some(IntKind::U16)
+        } else {
+            None
+        }
+    }
+
+    #[allow(clippy::manual_map)]
+    fn enum_variant_name(
+        &self,
+        _ : Option<&str>,
+        variant_name: &str,
+        _: EnumVariantValue,
+    ) -> Option<String> {
+        if let Some(n) = variant_name.strip_prefix("WGALLOWEDIP_A_") {
+            Some(n.to_string())
+        } else if let Some(n) = variant_name.strip_prefix("WGPEER_A_") {
+            Some(n.to_string())
+        } else if let Some(n) = variant_name.strip_prefix("WGPEER_F_") {
+            Some(n.to_string())
+        } else if let Some(n) = variant_name.strip_prefix("WGDEVICE_A_") {
+            Some(n.to_string())
+        } else if let Some(n) = variant_name.strip_prefix("WG_CMD_") {
+            Some(n.to_string())
+        } else {
+            None
+        }
+    }
+}
+
 fn main() {
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=nl.h");
@@ -21,6 +58,7 @@ fn main() {
         .allowlist_var("NLMSG_.*")
         .allowlist_var("GENL_ID_CTRL")
         .allowlist_file(".*wireguard.h")
+        .parse_callbacks(Box::new(CustomParser()))
         // .newtype_enum("wg.*")
         .constified_enum_module("wg.*")
         // Tell cargo to invalidate the built crate whenever any of the

@@ -167,7 +167,7 @@ impl<'a> Iterator for PartIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let available_size = self.msg.size - self.pos;
         let (header, new_pos) = self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size)?;
-        if (header.nlmsg_flags as u32 & bindings::NLM_F_MULTI) == bindings::NLM_F_MULTI {
+        if (header.nlmsg_flags & bindings::NLM_F_MULTI) == bindings::NLM_F_MULTI {
             println!("We got ourselves some multipart stuff");
         }
 
@@ -200,7 +200,7 @@ impl<'a> Iterator for PartIterator<'a> {
                 attributes_end: current_msg_limit, // end of the current msg part
                 msg: self.msg,
             }))
-        } else if header.nlmsg_type == bindings::NLMSG_ERROR as u16 {
+        } else if header.nlmsg_type == bindings::NLMSG_ERROR {
             let errno = i32::from_attr(&self.msg.inner[self.pos..self.pos + 4]).unwrap();
             self.pos += mem::size_of_val(&errno);
             if errno < 0 {
@@ -210,7 +210,7 @@ impl<'a> Iterator for PartIterator<'a> {
                 // it's not an error, but indicates success, lets skip this message
                 self.next()
             }
-        } else if header.nlmsg_type == bindings::NLMSG_DONE as u16 {
+        } else if header.nlmsg_type == bindings::NLMSG_DONE {
             println!("Multipart message is done");
             None
         } else {
