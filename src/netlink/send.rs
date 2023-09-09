@@ -2,6 +2,7 @@ use super::bindings::{
     genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr, NLA_F_NESTED, NLM_F_DUMP,
 };
 use core::slice;
+use nix::libc::{sockaddr_in, sockaddr_in6};
 use nix::sys::socket::{sendto, MsgFlags, NetlinkAddr};
 use std::io::Result;
 use std::mem;
@@ -14,6 +15,17 @@ pub trait ToAttr: Sized {
 impl ToAttr for () {
     fn serialize_at(self, _out: &mut [u8], _pos: usize) -> usize {
         0
+    }
+}
+
+impl<T> ToAttr for T where T: Sized + ReprC {
+    fn serialize_at(self, out: &mut [u8], pos: usize) -> usize {
+        let tlen = mem::size_of::<Self>();
+        let buf = unsafe {
+            slice::from_raw_parts((&self as *const T) as *const u8, tlen)
+        };
+        out[pos..pos + tlen].copy_from_slice(buf);
+        nl_align_length(tlen)
     }
 }
 
@@ -45,6 +57,8 @@ pub unsafe trait ReprC {}
 unsafe impl ReprC for nlattr {}
 unsafe impl ReprC for genlmsghdr {}
 unsafe impl ReprC for nlmsghdr {}
+unsafe impl ReprC for sockaddr_in6 {}
+unsafe impl ReprC for sockaddr_in {}
 
 pub trait NlSerializer {
     fn attr<T: ToAttr>(self, attr_type: u16, payload: T) -> Self;

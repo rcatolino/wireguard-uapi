@@ -4,11 +4,8 @@ use crate::netlink::{
     wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
     AttributeType, NestBuilder, NlSerializer,
 };
-use core::slice;
-use std::{
-    mem::{self, size_of},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::mem::size_of;
 
 fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
     if bytes.len() == size_of::<sockaddr_in6>() {
@@ -157,13 +154,7 @@ impl<T: NlSerializer> NestBuilder<T> {
                     sin_zero: [0u8; 8],
                 };
 
-                unsafe {
-                    let buf = slice::from_raw_parts(
-                        (&s as *const sockaddr_in) as *const u8,
-                        mem::size_of::<sockaddr_in>(),
-                    );
-                    self.attr_bytes(attr_type, buf)
-                }
+                self.attr(attr_type, s)
             }
             (IpAddr::V6(ipv6), port) => {
                 let s = sockaddr_in6 {
@@ -176,13 +167,7 @@ impl<T: NlSerializer> NestBuilder<T> {
                     sin6_scope_id: 0,
                 };
 
-                unsafe {
-                    let buf = slice::from_raw_parts(
-                        (&s as *const sockaddr_in6) as *const u8,
-                        mem::size_of::<sockaddr_in6>(),
-                    );
-                    self.attr_bytes(attr_type, buf)
-                }
+                self.attr(attr_type, s)
             }
         }
     }
