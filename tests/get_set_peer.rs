@@ -1,16 +1,11 @@
-mod netlink;
-mod wireguard;
-
-use netlink::{wg_cmd, wgdevice_attribute, AttributeType};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
+use wireguard_uapi::{netlink::{self, wg_cmd, wgdevice_attribute, AttributeType, NlSerializer}, wireguard::Peer};
 use std::{ffi::CStr, os::fd::AsRawFd};
-use wireguard::Peer;
 
-use crate::netlink::NlSerializer;
-
-fn main() {
+#[test]
+fn get_set_device() {
     println!("Interfaces : {}", netlink::get_interfaces());
     let s = socket(
         AddressFamily::Netlink,

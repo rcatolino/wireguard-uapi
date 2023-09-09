@@ -239,7 +239,7 @@ impl MsgBuffer {
         }
     }
 
-    /// Returns a copy of the internal buffer[start..size_of::<T>] transmutted into the type T
+    /// Returns a copy of the internal `buffer[start..size_of::<T>]` transmutted into the type T
     /// Returns None if the internal buffer doesn't have enough bytes left for T
     fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Option<(T, usize)> {
         if start + nl_size_of_aligned::<T>() > limit {
