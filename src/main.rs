@@ -11,6 +11,7 @@ use wireguard::Peer;
 use crate::netlink::NlSerializer;
 
 fn main() {
+    println!("Interfaces : {}", netlink::get_interfaces());
     let s = socket(
         AddressFamily::Netlink,
         SockType::Raw,
@@ -23,7 +24,8 @@ fn main() {
     let fid = netlink::get_family_id(netlink::WG_GENL_NAME, &s).unwrap();
     println!("Familly id : {}", fid);
 
-    let mut get_dev_cmd = netlink::MsgBuilder::new(fid, 2, wg_cmd::GET_DEVICE as u8)
+    let mut get_dev_cmd = netlink::MsgBuilder::new(fid, 2)
+        .generic(wg_cmd::GET_DEVICE as u8)
         .dump()
         .attr(wgdevice_attribute::IFINDEX as u16, 21u32);
 
@@ -46,7 +48,7 @@ fn main() {
                         let p = Peer::new(peer_attr);
                         println!("New peer : {:?}", p);
                         if let Some(mut peer) = p {
-                            peer.endpoint.1 = 2222;
+                            peer.endpoint.1 = 53476;
                             mod_peer = Some(peer);
                         }
                     }
@@ -58,7 +60,8 @@ fn main() {
     }
 
     println!("Re-setting peer : {:?}", mod_peer);
-    netlink::MsgBuilder::new(fid, 3, wg_cmd::SET_DEVICE as u8)
+    netlink::MsgBuilder::new(fid, 3)
+        .generic(wg_cmd::SET_DEVICE as u8)
         .attr(wgdevice_attribute::IFINDEX as u16, 21u32)
         .attr_list_start(wgdevice_attribute::PEERS as u16)
         .set_peer(mod_peer.as_ref().unwrap())

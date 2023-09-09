@@ -18,7 +18,7 @@ impl ParseCallbacks for CustomParser {
     #[allow(clippy::manual_map)]
     fn enum_variant_name(
         &self,
-        _ : Option<&str>,
+        _: Option<&str>,
         variant_name: &str,
         _: EnumVariantValue,
     ) -> Option<String> {
@@ -57,6 +57,8 @@ fn main() {
         .allowlist_var("NLA_F_.*")
         .allowlist_var("NLMSG_.*")
         .allowlist_var("GENL_ID_CTRL")
+        .allowlist_var("RTM_.*")
+        .allowlist_type("ifinfomsg")
         .allowlist_file(".*wireguard.h")
         .parse_callbacks(Box::new(CustomParser()))
         // .newtype_enum("wg.*")

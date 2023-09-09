@@ -44,3 +44,16 @@ impl nlmsghdr {
         }
     }
 }
+
+impl ifinfomsg {
+    pub fn new(family: u8) -> Self {
+        ifinfomsg {
+            ifi_family: family,
+            ifi_type: 0,
+            __ifi_pad: 0,
+            ifi_index: 0,
+            ifi_flags: 0,
+            ifi_change: 0xFFFFFFFF,
+        }
+    }
+}

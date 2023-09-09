@@ -5,4 +5,5 @@
 #define __u16 uint16_t
 
 #include <linux/genetlink.h>
+#include <linux/rtnetlink.h>
 #include <linux/wireguard.h>
