@@ -3,7 +3,6 @@ mod recv;
 mod rt;
 mod send;
 
-use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 
 pub use bindings::{
@@ -13,9 +12,27 @@ use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer};
+pub use rt::rtm_getlink;
 pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
 
-use self::rt::RtBuilder;
+use self::recv::NetlinkType;
+
+#[derive(Debug)]
+pub enum Error {
+    Truncated,
+    MultipartNotDone,
+    Interrupted,
+    Invalid,
+    IoError(std::io::Error),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Error::IoError(value)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     let mut builder = MsgBuilder::new(bindings::GENL_ID_CTRL, 1)
@@ -24,10 +41,10 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     builder.sendto(fd)?;
 
     // Receive response :
-    let mut buffer = MsgBuffer::new(bindings::GENL_ID_CTRL);
+    let mut buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
     buffer.recv(fd)?;
     let mut fid = 0;
-    for mb_msg in &buffer {
+    for mb_msg in &mut buffer {
         let msg = mb_msg?;
         // println!("Msg header {:?}", msg.header);
         match msg.attributes().find_map(|att| match att.attribute_type {
@@ -40,18 +57,15 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     }
 
     // Receive error msg :
-    let mut buffer = MsgBuffer::new(bindings::GENL_ID_CTRL);
+    let mut buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
     buffer.recv(fd)?;
 
     // We now know the family id !
     if fid == 0 {
-        return Err(Error::new(
-            ErrorKind::Other,
-            "Missing family id attribute in netlink response",
-        ));
+        Err(Error::Invalid)
+    } else {
+        Ok(fid)
     }
-
-    Ok(fid)
 }
 
 pub fn get_interfaces() -> String {
@@ -65,6 +79,6 @@ pub fn get_interfaces() -> String {
 
     bind(s.as_raw_fd(), &NetlinkAddr::new(0, 0)).unwrap();
 
-    let rtbuilder = RtBuilder::new(bindings::RTM_GETLINK as u16, 1);
+    rtm_getlink(s).unwrap();
     String::from("")
 }

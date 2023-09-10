@@ -58,6 +58,7 @@ fn main() {
         .allowlist_var("NLMSG_.*")
         .allowlist_var("GENL_ID_CTRL")
         .allowlist_var("RTM_.*")
+        .allowlist_var("IFLA_.*")
         .allowlist_type("ifinfomsg")
         .allowlist_file(".*wireguard.h")
         .parse_callbacks(Box::new(CustomParser()))

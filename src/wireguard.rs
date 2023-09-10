@@ -4,8 +4,8 @@ use crate::netlink::{
     wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
     AttributeType, NestBuilder, NlSerializer,
 };
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::mem::size_of;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
     if bytes.len() == size_of::<sockaddr_in6>() {

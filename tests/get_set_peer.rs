@@ -1,8 +1,9 @@
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
-use wireguard_uapi::{netlink::{self, wg_cmd, wgdevice_attribute, AttributeType, NlSerializer}, wireguard::Peer};
 use std::{ffi::CStr, os::fd::AsRawFd};
+use wireguard_uapi::netlink::{self, wg_cmd, wgdevice_attribute, AttributeType, NlSerializer};
+use wireguard_uapi::wireguard::Peer;
 
 #[test]
 fn get_set_device() {

@@ -1,9 +1,11 @@
 use nix::sys::socket::{recvfrom, NetlinkAddr};
-use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 use std::{fmt, mem};
 
-use super::bindings::{self, genlmsghdr, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr};
+use super::bindings::{
+    self, genlmsghdr, ifinfomsg, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr,
+};
+use super::{Error, Result};
 
 pub trait FromAttr: Sized {
     fn from_attr(buffer: &[u8]) -> Option<Self>;
@@ -125,7 +127,7 @@ pub struct AttributeIterator<'a> {
 impl<'a> Iterator for AttributeIterator<'a> {
     type Item = Attribute<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        let (attr, new_pos) = self.msg.deserialize::<nlattr>(self.pos, self.end)?;
+        let (attr, new_pos) = self.msg.deserialize::<nlattr>(self.pos, self.end).ok()?;
         if new_pos + nl_align_length(attr.payload_length()) > self.end {
             panic!(
                 "Attribute {:?} payload is bigger than buffer size from {} to {}",
@@ -139,9 +141,16 @@ impl<'a> Iterator for AttributeIterator<'a> {
 }
 
 #[derive(Debug)]
+pub enum SubHeader {
+    Generic(genlmsghdr),
+    RouteIfinfo(ifinfomsg),
+    None,
+}
+
+#[derive(Debug)]
 pub struct MsgPart<'a> {
     pub header: nlmsghdr,
-    pub gen_header: genlmsghdr,
+    pub sub_header: SubHeader,
     attributes_start: usize,
     attributes_end: usize,
     msg: &'a MsgBuffer,
@@ -166,46 +175,44 @@ impl<'a> Iterator for PartIterator<'a> {
     type Item = Result<MsgPart<'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         let available_size = self.msg.size - self.pos;
-        let (header, new_pos) = self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size)?;
+        let (header, new_pos) = match self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size) {
+            Ok((header, new_pos)) => (header, new_pos),
+            Err(Error::Truncated) => return Some(Err(Error::MultipartNotDone)),
+            Err(e) => return Some(Err(e)),
+        };
+
         if (header.nlmsg_flags & bindings::NLM_F_MULTI) == bindings::NLM_F_MULTI {
             println!("We got ourselves some multipart stuff");
         }
 
+        if (header.nlmsg_flags & bindings::NLM_F_DUMP_FILTERED) == bindings::NLM_F_DUMP_FILTERED {
+            println!("This dump has been filtered");
+        }
+
+        if (header.nlmsg_flags & bindings::NLM_F_DUMP_INTR) == bindings::NLM_F_DUMP_INTR {
+            println!("This dump has been interrupted");
+        }
+
         if header.nlmsg_len as usize > available_size {
+            // Dump truncated
             println!(
                 "Error decoding message : {:?}",
                 &self.msg.inner[self.pos..self.msg.size]
             );
             self.pos = self.msg.size; // Set pos to end to prevent further iteration
-            return Some(Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "Message size {} > available size {}",
-                    header.nlmsg_len, available_size
-                ),
-            )));
+            return Some(Err(Error::Truncated));
         }
 
         let current_msg_limit = self.pos + header.nlmsg_len as usize;
         self.pos = new_pos; // position after the nlmsghdr
-        if header.nlmsg_type == self.msg.family_id {
-            let (gen_header, new_pos) = self
-                .msg
-                .deserialize::<genlmsghdr>(self.pos, current_msg_limit)?;
-            self.pos = current_msg_limit;
-            Some(Ok(MsgPart {
-                header,
-                gen_header,
-                attributes_start: new_pos, // position after the genlmsghdr
-                attributes_end: current_msg_limit, // end of the current msg part
-                msg: self.msg,
-            }))
-        } else if header.nlmsg_type == bindings::NLMSG_ERROR {
+        if header.nlmsg_type == bindings::NLMSG_ERROR {
             let errno = i32::from_attr(&self.msg.inner[self.pos..self.pos + 4]).unwrap();
             self.pos += mem::size_of_val(&errno);
             if errno < 0 {
                 println!("Received netlink error {}", errno);
-                Some(Err(Error::from_raw_os_error(errno)))
+                Some(Err(Error::IoError(std::io::Error::from_raw_os_error(
+                    errno,
+                ))))
             } else {
                 // it's not an error, but indicates success, lets skip this message
                 self.next()
@@ -214,37 +221,72 @@ impl<'a> Iterator for PartIterator<'a> {
             println!("Multipart message is done");
             None
         } else {
-            panic!(
-                "Unsupported netlink message type/family: {}",
-                header.nlmsg_type
-            )
+            let (sub_header, new_pos) = match self.msg.msg_type {
+                NetlinkType::Generic(family_id) if header.nlmsg_type == family_id => {
+                    match self
+                        .msg
+                        .deserialize::<genlmsghdr>(self.pos, current_msg_limit)
+                    {
+                        Ok((gen_header, new_pos)) => (SubHeader::Generic(gen_header), new_pos),
+                        Err(e) => return Some(Err(e)),
+                    }
+                }
+                NetlinkType::Route(msg_type) if header.nlmsg_type == msg_type => {
+                    match self
+                        .msg
+                        .deserialize::<ifinfomsg>(self.pos, current_msg_limit)
+                    {
+                        Ok((if_header, new_pos)) => (SubHeader::RouteIfinfo(if_header), new_pos),
+                        Err(e) => return Some(Err(e)),
+                    }
+                }
+                _ => panic!(
+                    "Unsupported netlink family/msg type : {}",
+                    header.nlmsg_type
+                ),
+            };
+
+            self.pos = current_msg_limit;
+            Some(Ok(MsgPart {
+                header,
+                sub_header,
+                attributes_start: new_pos, // position after nlmsghdr
+                attributes_end: current_msg_limit, // end of the current msg part
+                msg: self.msg,
+            }))
         }
     }
 }
 
 #[derive(Debug)]
+pub enum NetlinkType {
+    Generic(u16),
+    Route(u16),
+}
+
+#[derive(Debug)]
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
 pub struct MsgBuffer {
-    pub inner: [u8; 2048],
+    pub inner: [u8; 4096],
     size: usize,
-    family_id: u16,
+    msg_type: NetlinkType,
 }
 
 impl MsgBuffer {
-    pub fn new(family_id: u16) -> Self {
+    pub fn new(msg_type: NetlinkType) -> Self {
         MsgBuffer {
-            inner: [0u8; 2048],
+            inner: [0u8; 4096],
             size: 0,
-            family_id,
+            msg_type,
         }
     }
 
     /// Returns a copy of the internal `buffer[start..size_of::<T>]` transmutted into the type T
     /// Returns None if the internal buffer doesn't have enough bytes left for T
-    fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Option<(T, usize)> {
+    fn deserialize<T: Copy>(&self, start: usize, limit: usize) -> Result<(T, usize)> {
         if start + nl_size_of_aligned::<T>() > limit {
             // Not enough bytes available to decode the header
-            return None;
+            return Err(Error::Truncated);
         }
 
         let (prefix, header, suffix) =
@@ -253,10 +295,10 @@ impl MsgBuffer {
         assert_eq!(prefix.len(), 0);
         assert_eq!(suffix.len(), 0);
         assert_eq!(header.len(), 1);
-        Some((header[0], start + nl_size_of_aligned::<T>()))
+        Ok((header[0], start + nl_size_of_aligned::<T>()))
     }
 
-    pub fn recv<T: AsRawFd>(&mut self, fd: &T) -> Result<()> {
+    pub fn recv<T: AsRawFd>(&mut self, fd: &T) -> std::io::Result<()> {
         let (read, _addr) = recvfrom::<NetlinkAddr>(fd.as_raw_fd(), &mut self.inner)?;
         // println!("Hello netlink : {:?} from {:?}", &self.inner[..read], _addr);
         self.size = read;
@@ -264,7 +306,7 @@ impl MsgBuffer {
     }
 }
 
-impl<'a> IntoIterator for &'a MsgBuffer {
+impl<'a> IntoIterator for &'a mut MsgBuffer {
     type Item = Result<MsgPart<'a>>;
     type IntoIter = PartIterator<'a>;
 
