@@ -6,6 +6,7 @@ use crate::netlink::{
 };
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::ops::Deref;
 
 fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
     if bytes.len() == size_of::<sockaddr_in6>() {
@@ -54,21 +55,21 @@ fn parse_allowed_ip(ip_attr: Attribute<'_>) -> Option<(IpAddr, u8)> {
 
     let ip = if family? as i32 == AF_INET {
         // ipv4
-        if bytes?.len() != 4 {
+        if bytes.as_ref()?.len() != 4 {
             println!("Unexpected attribute length for ipv4 ip : {:?}", bytes?);
             return None;
         }
 
-        let buf: [u8; 4] = bytes.and_then(|b| b.try_into().ok())?;
+        let buf: [u8; 4] = bytes.and_then(|b| b.deref().try_into().ok())?;
         IpAddr::V4(Ipv4Addr::from(buf))
     } else if family? as i32 == AF_INET6 {
         // ipv6
-        if bytes?.len() != 16 {
+        if bytes.as_ref()?.len() != 16 {
             println!("Unexpected attribute length for ipv6 : {:?}", bytes?);
             return None;
         }
 
-        let buf: [u8; 16] = bytes.and_then(|b| b.try_into().ok())?;
+        let buf: [u8; 16] = bytes.and_then(|b| b.deref().try_into().ok())?;
         IpAddr::V6(Ipv6Addr::from(buf))
     } else {
         println!("Unexpected ip family : {:?}", family?);
@@ -96,10 +97,10 @@ impl Peer {
         for a in attributes {
             match a.attribute_type {
                 AttributeType::Raw(wgpeer_attribute::PUBLIC_KEY) => {
-                    peer_key.extend_from_slice(a.get_bytes()?);
+                    peer_key.extend_from_slice(&a.get_bytes()?);
                 }
                 AttributeType::Raw(wgpeer_attribute::ENDPOINT) => {
-                    endpoint = a.get_bytes().and_then(parse_endpoint);
+                    endpoint = a.get_bytes().and_then(|ref b| parse_endpoint(b));
                 }
                 AttributeType::Raw(wgpeer_attribute::PERSISTENT_KEEPALIVE_INTERVAL) => {
                     keepalive = a.get::<u16>().filter(|v| *v != 0);

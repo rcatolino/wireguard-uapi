@@ -30,9 +30,9 @@ pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
         .ifinfomsg(AF_UNSPEC as u8)
         .sendto(&fd)?;
 
-    let mut buffer = MsgBuffer::new(NetlinkType::Route(RTM_NEWLINK as u16));
-    buffer.recv(&fd)?;
-    for mb_msg in &buffer {
+    let buffer = MsgBuffer::new(NetlinkType::Route(RTM_NEWLINK as u16));
+    // buffer.recv(&fd)?;
+    for mb_msg in buffer.recv_msgs(&fd) {
         let msg = mb_msg?;
         let (ifindex, iftype) = match msg.sub_header {
             SubHeader::RouteIfinfo(ifinfomsg {
@@ -48,7 +48,7 @@ pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
             match attr.attribute_type {
                 AttributeType::Raw(IFLA_IFNAME) => {
                     let ifname = attr.get_bytes().unwrap();
-                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(ifname).unwrap());
+                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(&ifname).unwrap());
                 }
                 AttributeType::Nested(IFLA_LINKINFO) => {
                     for sattr in attr.attributes() {

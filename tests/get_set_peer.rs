@@ -26,17 +26,16 @@ fn get_set_device() {
         .attr(wgdevice_attribute::IFINDEX as u16, 21u32);
 
     get_dev_cmd.sendto(&s).unwrap();
-    let mut buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
-    buffer.recv(&s).unwrap();
+    let buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
     let mut mod_peer = None;
-    for mb_msg in &buffer {
+    for mb_msg in buffer.recv_msgs(&s) {
         let msg = mb_msg.unwrap();
         println!("Msg header {:?}", msg.header);
         for attribute in msg.attributes() {
             match attribute.attribute_type {
                 AttributeType::Raw(wgdevice_attribute::IFNAME) => {
                     let ifname = attribute.get_bytes().unwrap();
-                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(ifname).unwrap());
+                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(&ifname).unwrap());
                 }
                 AttributeType::Nested(wgdevice_attribute::PEERS) => {
                     println!("Nested attribute peers :");
@@ -65,9 +64,8 @@ fn get_set_device() {
         .sendto(&s)
         .unwrap();
 
-    let mut buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
-    buffer.recv(&s).unwrap();
-    for mb_msg in &buffer {
+    let buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
+    for mb_msg in buffer.recv_msgs(&s) {
         match mb_msg {
             Err(e) => println!("Receive err resp : {:?}", e),
             Ok(msg) => {

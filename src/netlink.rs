@@ -40,10 +40,9 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     builder.sendto(fd)?;
 
     // Receive response :
-    let mut buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
-    buffer.recv(fd)?;
+    let buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
     let mut fid = 0;
-    for mb_msg in &buffer {
+    for mb_msg in buffer.recv_msgs(fd) {
         let msg = mb_msg?;
         // println!("Msg header {:?}", msg.header);
         match msg.attributes().find_map(|att| match att.attribute_type {
@@ -56,8 +55,10 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     }
 
     // Receive error msg :
-    let mut buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
-    buffer.recv(fd)?;
+    // let mut buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
+    for mb_msg in buffer.recv_msgs(fd) {
+        println!("Error msg : {:?}", mb_msg);
+    }
 
     // We now know the family id !
     if fid == 0 {

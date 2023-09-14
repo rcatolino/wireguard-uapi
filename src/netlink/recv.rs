@@ -1,5 +1,7 @@
 use nix::sys::socket::{recvfrom, NetlinkAddr};
-use std::os::fd::AsRawFd;
+use std::cell::{RefCell, Ref, Cell};
+use std::ops::DerefMut;
+use std::os::fd::{AsRawFd, RawFd};
 use std::{fmt, mem};
 
 use super::bindings::{
@@ -92,12 +94,12 @@ impl<'a> Attribute<'a> {
         }
     }
 
-    pub fn get_bytes(&self) -> Option<&'a [u8]> {
-        Some(&self.msg.inner[self.payload_start..self.payload_end])
+    pub fn get_bytes(&self) -> Option<Ref<'a, [u8]>> {
+        Some(Ref::map(self.msg.inner.borrow(), |b| b.get(self.payload_start..self.payload_end).unwrap()))
     }
 
     pub fn get<T: FromAttr>(&self) -> Option<T> {
-        T::from_attr(self.get_bytes()?)
+        T::from_attr(&self.get_bytes()?)
     }
 
     /// Returns an iterator over the sub-attributes.
@@ -157,6 +159,9 @@ pub struct MsgPart<'a> {
 }
 
 impl MsgPart<'_> {
+    // Here we don't bind the lifetime of the attribute iterator to the lifetime of MsgPart's
+    // buffer, because the attributes shouldn't outlive the inner buffer. They will point to
+    // the wrong bytes if MsgBuffer::recv has been called after the attribute has been created.
     pub fn attributes(&self) -> AttributeIterator<'_> {
         AttributeIterator {
             pos: self.attributes_start,
@@ -169,15 +174,20 @@ impl MsgPart<'_> {
 pub struct PartIterator<'a> {
     pos: usize,
     msg: &'a MsgBuffer,
+    fd: RawFd,
 }
 
 impl<'a> Iterator for PartIterator<'a> {
     type Item = Result<MsgPart<'a>>;
     fn next(&mut self) -> Option<Self::Item> {
-        let available_size = self.msg.size - self.pos;
-        let (header, new_pos) = match self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size) {
+        let available_size = self.msg.size.get() - self.pos;
+        let (header, new_pos) = match self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size.get()) {
             Ok((header, new_pos)) => (header, new_pos),
-            Err(Error::Truncated) => return Some(Err(Error::MultipartNotDone)),
+            Err(Error::Truncated) => {
+                self.pos = 0;
+                self.msg.recv(&self.fd).unwrap();
+                return self.next(); // Restart with new data
+            }
             Err(e) => return Some(Err(e)),
         };
 
@@ -197,16 +207,16 @@ impl<'a> Iterator for PartIterator<'a> {
             // Dump truncated
             println!(
                 "Error decoding message : {:?}",
-                &self.msg.inner[self.pos..self.msg.size]
+                &self.msg.inner.borrow()[self.pos..self.msg.size.get()]
             );
-            self.pos = self.msg.size; // Set pos to end to prevent further iteration
+            self.pos = self.msg.size.get(); // Set pos to end to prevent further iteration
             return Some(Err(Error::Truncated));
         }
 
         let current_msg_limit = self.pos + header.nlmsg_len as usize;
         self.pos = new_pos; // position after the nlmsghdr
         if header.nlmsg_type == bindings::NLMSG_ERROR {
-            let errno = i32::from_attr(&self.msg.inner[self.pos..self.pos + 4]).unwrap();
+            let errno = i32::from_attr(&self.msg.inner.borrow()[self.pos..self.pos + 4]).unwrap();
             self.pos += mem::size_of_val(&errno);
             if errno < 0 {
                 println!("Received netlink error {}", errno);
@@ -267,16 +277,16 @@ pub enum NetlinkType {
 #[derive(Debug)]
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
 pub struct MsgBuffer {
-    pub inner: [u8; 4096],
-    size: usize,
+    pub inner: RefCell<[u8; 4096]>,
+    size: Cell<usize>,
     msg_type: NetlinkType,
 }
 
 impl MsgBuffer {
     pub fn new(msg_type: NetlinkType) -> Self {
         MsgBuffer {
-            inner: [0u8; 4096],
-            size: 0,
+            inner: [0u8; 4096].into(),
+            size: 0.into(),
             msg_type,
         }
     }
@@ -289,28 +299,27 @@ impl MsgBuffer {
             return Err(Error::Truncated);
         }
 
-        let (prefix, header, suffix) =
-            unsafe { self.inner[start..start + mem::size_of::<T>()].align_to::<T>() };
-        // The buffer is aligned to 4 bytes, prefix and suffix must be empty :
-        assert_eq!(prefix.len(), 0);
-        assert_eq!(suffix.len(), 0);
-        assert_eq!(header.len(), 1);
-        Ok((header[0], start + nl_size_of_aligned::<T>()))
+        let header = unsafe { 
+            let bref = self.inner.borrow();
+            let (prefix, header, suffix) = bref[start..start + mem::size_of::<T>()].align_to::<T>();
+            assert_eq!(prefix.len(), 0);
+            // The buffer is aligned to 4 bytes, prefix and suffix must be empty :
+            assert_eq!(suffix.len(), 0);
+            assert_eq!(header.len(), 1);
+            header[0]
+        };
+
+        Ok((header, start + nl_size_of_aligned::<T>()))
     }
 
-    pub fn recv<T: AsRawFd>(&mut self, fd: &T) -> std::io::Result<()> {
-        let (read, _addr) = recvfrom::<NetlinkAddr>(fd.as_raw_fd(), &mut self.inner)?;
+    fn recv<T: AsRawFd>(&self, fd: &T) -> std::io::Result<()> {
+        let (read, _addr) = recvfrom::<NetlinkAddr>(fd.as_raw_fd(), self.inner.borrow_mut().deref_mut())?;
         // println!("Hello netlink : {:?} from {:?}", &self.inner[..read], _addr);
-        self.size = read;
+        self.size.replace(read);
         Ok(())
     }
-}
 
-impl<'a> IntoIterator for &'a MsgBuffer {
-    type Item = Result<MsgPart<'a>>;
-    type IntoIter = PartIterator<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        PartIterator { pos: 0, msg: self }
+    pub fn recv_msgs<T: AsRawFd>(&self, fd: &T) -> PartIterator<'_> {
+        PartIterator { pos: 0, msg: self, fd : fd.as_raw_fd() }
     }
 }
