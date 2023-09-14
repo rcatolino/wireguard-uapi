@@ -11,11 +11,10 @@ pub use bindings::{
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
-pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer};
+pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer, NetlinkType};
 pub use rt::rtm_getlink;
 pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
 
-use self::recv::NetlinkType;
 
 #[derive(Debug)]
 pub enum Error {
@@ -44,7 +43,7 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     let mut buffer = MsgBuffer::new(NetlinkType::Generic(bindings::GENL_ID_CTRL));
     buffer.recv(fd)?;
     let mut fid = 0;
-    for mb_msg in &mut buffer {
+    for mb_msg in &buffer {
         let msg = mb_msg?;
         // println!("Msg header {:?}", msg.header);
         match msg.attributes().find_map(|att| match att.attribute_type {

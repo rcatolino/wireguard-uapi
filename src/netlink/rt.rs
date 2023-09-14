@@ -32,7 +32,7 @@ pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
 
     let mut buffer = MsgBuffer::new(NetlinkType::Route(RTM_NEWLINK as u16));
     buffer.recv(&fd)?;
-    for mb_msg in &mut buffer {
+    for mb_msg in &buffer {
         let msg = mb_msg?;
         let (ifindex, iftype) = match msg.sub_header {
             SubHeader::RouteIfinfo(ifinfomsg {

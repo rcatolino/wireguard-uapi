@@ -2,7 +2,7 @@ use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 use std::{ffi::CStr, os::fd::AsRawFd};
-use wireguard_uapi::netlink::{self, wg_cmd, wgdevice_attribute, AttributeType, NlSerializer};
+use wireguard_uapi::netlink::{self, wg_cmd, wgdevice_attribute, AttributeType, NlSerializer, NetlinkType};
 use wireguard_uapi::wireguard::Peer;
 
 #[test]
@@ -26,7 +26,7 @@ fn get_set_device() {
         .attr(wgdevice_attribute::IFINDEX as u16, 21u32);
 
     get_dev_cmd.sendto(&s).unwrap();
-    let mut buffer = netlink::MsgBuffer::new(fid);
+    let mut buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
     buffer.recv(&s).unwrap();
     let mut mod_peer = None;
     for mb_msg in &buffer {
@@ -65,7 +65,7 @@ fn get_set_device() {
         .sendto(&s)
         .unwrap();
 
-    let mut buffer = netlink::MsgBuffer::new(fid);
+    let mut buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
     buffer.recv(&s).unwrap();
     for mb_msg in &buffer {
         match mb_msg {

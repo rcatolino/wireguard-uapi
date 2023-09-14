@@ -306,7 +306,7 @@ impl MsgBuffer {
     }
 }
 
-impl<'a> IntoIterator for &'a mut MsgBuffer {
+impl<'a> IntoIterator for &'a MsgBuffer {
     type Item = Result<MsgPart<'a>>;
     type IntoIter = PartIterator<'a>;
 
