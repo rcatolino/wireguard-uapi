@@ -7,7 +7,6 @@ use wireguard_uapi::wireguard::Peer;
 
 #[test]
 fn get_set_device() {
-    println!("Interfaces : {}", netlink::get_interfaces());
     let s = socket(
         AddressFamily::Netlink,
         SockType::Raw,

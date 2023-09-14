@@ -102,6 +102,20 @@ impl<'a> Attribute<'a> {
         T::from_attr(&self.get_bytes()?)
     }
 
+    /// Returns a new attribute pointing to the same data, but make it nested.
+    /// This is useful for RT attributes that don't set the nested flag.
+    pub fn make_nested(&self) -> Self {
+        Attribute {
+            payload_start: self.payload_start,
+            payload_end: self.payload_end,
+            attribute_type: match self.attribute_type {
+                AttributeType::Raw(t) => AttributeType::Nested(t),
+                AttributeType::Nested(t) => AttributeType::Nested(t),
+            },
+            msg: self.msg,
+        }
+    }
+
     /// Returns an iterator over the sub-attributes.
     /// If the current attribute is not nested, the iterator will only yield None
     pub fn attributes(&self) -> AttributeIterator<'a> {
@@ -206,8 +220,10 @@ impl<'a> Iterator for PartIterator<'a> {
         if header.nlmsg_len as usize > available_size {
             // Dump truncated
             println!(
-                "Error decoding message : {:?}",
-                &self.msg.inner.borrow()[self.pos..self.msg.size.get()]
+                "Error decoding message : {:?}, length = {}, buffer size : {}",
+                &self.msg.inner.borrow()[self.pos..self.msg.size.get()],
+                header.nlmsg_len,
+                available_size
             );
             self.pos = self.msg.size.get(); // Set pos to end to prevent further iteration
             return Some(Err(Error::Truncated));
@@ -225,7 +241,9 @@ impl<'a> Iterator for PartIterator<'a> {
                 ))))
             } else {
                 // it's not an error, but indicates success, lets skip this message
-                self.next()
+                // Also, skip the copy of the header we sent that comes with the error message :
+                self.pos += nl_size_of_aligned::<nlmsghdr>();
+                None
             }
         } else if header.nlmsg_type == bindings::NLMSG_DONE {
             println!("Multipart message is done");

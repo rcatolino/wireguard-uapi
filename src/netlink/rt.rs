@@ -50,9 +50,10 @@ pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
                     let ifname = attr.get_bytes().unwrap();
                     println!("Ifname : {:?}", CStr::from_bytes_with_nul(&ifname).unwrap());
                 }
-                AttributeType::Nested(IFLA_LINKINFO) => {
-                    for sattr in attr.attributes() {
-                        println!("Linkinfo attr : {:?}", sattr);
+                AttributeType::Raw(IFLA_LINKINFO) => {
+                    for sattr in attr.make_nested().attributes() {
+                        let type_name = sattr.get_bytes().unwrap();
+                        println!("Linkinfo : {:?}", CStr::from_bytes_with_nul(&type_name).unwrap());
                     }
                 }
                 _ => println!("Unknown attr : {:?}", attr),
