@@ -1,5 +1,6 @@
 use nix::sys::socket::{recvfrom, NetlinkAddr};
 use std::cell::{RefCell, Ref, Cell};
+use std::ffi::{CStr, CString};
 use std::ops::DerefMut;
 use std::os::fd::{AsRawFd, RawFd};
 use std::{fmt, mem};
@@ -38,6 +39,12 @@ impl FromAttr for u8 {
     fn from_attr(buffer: &[u8]) -> Option<Self> {
         let buf = buffer[0..1].try_into().ok()?;
         Some(u8::from_le_bytes(buf))
+    }
+}
+
+impl FromAttr for CString {
+    fn from_attr(buffer: &[u8]) -> Option<Self> {
+        CStr::from_bytes_with_nul(buffer).ok().map(Into::into)
     }
 }
 

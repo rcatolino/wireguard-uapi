@@ -1,4 +1,4 @@
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::fd::AsRawFd;
 
 use nix::libc::AF_UNSPEC;
@@ -47,13 +47,13 @@ pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
         for attr in msg.attributes() {
             match attr.attribute_type {
                 AttributeType::Raw(IFLA_IFNAME) => {
-                    let ifname = attr.get_bytes().unwrap();
-                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(&ifname).unwrap());
+                    let ifname = attr.get::<CString>().unwrap();
+                    println!("Ifname : {:?}", ifname);
                 }
                 AttributeType::Raw(IFLA_LINKINFO) => {
                     for sattr in attr.make_nested().attributes() {
-                        let type_name = sattr.get_bytes().unwrap();
-                        println!("Linkinfo : {:?}", CStr::from_bytes_with_nul(&type_name).unwrap());
+                        let type_name = sattr.get::<CString>().unwrap();
+                        println!("Linkinfo : {:?}", type_name);
                     }
                 }
                 _ => println!("Unknown attr : {:?}", attr),
