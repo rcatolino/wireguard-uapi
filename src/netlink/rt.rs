@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::os::fd::AsRawFd;
 
 use nix::libc::AF_UNSPEC;
@@ -7,6 +7,14 @@ use super::bindings::{ifinfomsg, IFLA_IFNAME, IFLA_LINKINFO, RTM_GETLINK, RTM_NE
 use super::recv::{NetlinkType, SubHeader};
 use super::send::NlSerializer;
 use super::{AttributeType, MsgBuffer, MsgBuilder, Result};
+
+#[derive(Debug)]
+pub struct IfLink {
+    pub name: CString,
+    pub index: i32,
+    pub iftype: u16,
+    pub type_name: Option<CString>,
+}
 
 impl MsgBuilder {
     fn ifinfomsg(mut self, family: u8) -> Self {
@@ -24,17 +32,17 @@ impl MsgBuilder {
     }
 }
 
-pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
+pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<Vec<IfLink>> {
     MsgBuilder::new(RTM_GETLINK as u16, 1)
         .dump()
         .ifinfomsg(AF_UNSPEC as u8)
         .sendto(&fd)?;
 
     let buffer = MsgBuffer::new(NetlinkType::Route(RTM_NEWLINK as u16));
-    // buffer.recv(&fd)?;
+    let mut result = Vec::new();
     for mb_msg in buffer.recv_msgs(&fd) {
         let msg = mb_msg?;
-        let (ifindex, iftype) = match msg.sub_header {
+        let (index, iftype) = match msg.sub_header {
             SubHeader::RouteIfinfo(ifinfomsg {
                 ifi_index,
                 ifi_type,
@@ -43,23 +51,38 @@ pub fn rtm_getlink<T: AsRawFd>(fd: T) -> Result<()> {
             _ => continue,
         };
 
-        println!("New msg for interface n° {}, type : {}", ifindex, iftype);
+        let mut ifname = None;
+        let mut type_name = None;
+        println!("New msg for interface n° {}, type : {}", index, iftype);
         for attr in msg.attributes() {
             match attr.attribute_type {
                 AttributeType::Raw(IFLA_IFNAME) => {
-                    let ifname = attr.get::<CString>().unwrap();
+                    ifname = attr.get::<CString>();
                     println!("Ifname : {:?}", ifname);
                 }
                 AttributeType::Raw(IFLA_LINKINFO) => {
                     for sattr in attr.make_nested().attributes() {
-                        let type_name = sattr.get::<CString>().unwrap();
+                        type_name = sattr.get::<CString>();
                         println!("Linkinfo : {:?}", type_name);
                     }
                 }
                 _ => println!("Unknown attr : {:?}", attr),
             }
         }
+
+        let link_info = IfLink {
+            name: if let Some(name) = ifname {
+                name
+            } else {
+                continue;
+            },
+            iftype,
+            type_name,
+            index,
+        };
+
+        result.push(link_info);
     }
 
-    Ok(())
+    Ok(result)
 }

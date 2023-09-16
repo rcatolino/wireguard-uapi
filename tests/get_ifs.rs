@@ -1,6 +1,6 @@
-use wireguard_uapi::netlink::get_interfaces;
+use wireguard_uapi::wireguard::get_interfaces;
 
 #[test]
 fn get_ifs() {
-    get_interfaces();
+    println!("Interfaces : {:?}", get_interfaces());
 }

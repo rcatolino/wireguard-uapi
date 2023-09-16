@@ -15,6 +15,7 @@ pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer, NetlinkTy
 pub use rt::rtm_getlink;
 pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
 
+use self::rt::IfLink;
 
 #[derive(Debug)]
 pub enum Error {
@@ -68,7 +69,7 @@ pub fn get_family_id<T: AsRawFd>(family_name: &[u8], fd: &T) -> Result<u16> {
     }
 }
 
-pub fn get_interfaces() -> String {
+pub fn get_interfaces() -> Vec<IfLink> {
     let s = socket(
         AddressFamily::Netlink,
         SockType::Raw,
@@ -78,7 +79,5 @@ pub fn get_interfaces() -> String {
     .unwrap();
 
     bind(s.as_raw_fd(), &NetlinkAddr::new(0, 0)).unwrap();
-
-    rtm_getlink(s).unwrap();
-    String::from("")
+    rtm_getlink(s).unwrap()
 }

@@ -1,8 +1,11 @@
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
-use std::{ffi::CStr, os::fd::AsRawFd};
-use wireguard_uapi::netlink::{self, wg_cmd, wgdevice_attribute, AttributeType, NlSerializer, NetlinkType};
+use std::ffi::CString;
+use std::os::fd::AsRawFd;
+use wireguard_uapi::netlink::{
+    self, wg_cmd, wgdevice_attribute, AttributeType, NetlinkType, NlSerializer,
+};
 use wireguard_uapi::wireguard::Peer;
 
 #[test]
@@ -33,8 +36,8 @@ fn get_set_device() {
         for attribute in msg.attributes() {
             match attribute.attribute_type {
                 AttributeType::Raw(wgdevice_attribute::IFNAME) => {
-                    let ifname = attribute.get_bytes().unwrap();
-                    println!("Ifname : {:?}", CStr::from_bytes_with_nul(&ifname).unwrap());
+                    let ifname = attribute.get::<CString>().unwrap();
+                    println!("Ifname : {:?}", ifname);
                 }
                 AttributeType::Nested(wgdevice_attribute::PEERS) => {
                     println!("Nested attribute peers :");

@@ -1,5 +1,5 @@
 use nix::sys::socket::{recvfrom, NetlinkAddr};
-use std::cell::{RefCell, Ref, Cell};
+use std::cell::{Cell, Ref, RefCell};
 use std::ffi::{CStr, CString};
 use std::ops::DerefMut;
 use std::os::fd::{AsRawFd, RawFd};
@@ -102,7 +102,9 @@ impl<'a> Attribute<'a> {
     }
 
     pub fn get_bytes(&self) -> Option<Ref<'a, [u8]>> {
-        Some(Ref::map(self.msg.inner.borrow(), |b| b.get(self.payload_start..self.payload_end).unwrap()))
+        Some(Ref::map(self.msg.inner.borrow(), |b| {
+            b.get(self.payload_start..self.payload_end).unwrap()
+        }))
     }
 
     pub fn get<T: FromAttr>(&self) -> Option<T> {
@@ -202,7 +204,10 @@ impl<'a> Iterator for PartIterator<'a> {
     type Item = Result<MsgPart<'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         let available_size = self.msg.size.get() - self.pos;
-        let (header, new_pos) = match self.msg.deserialize::<nlmsghdr>(self.pos, self.msg.size.get()) {
+        let (header, new_pos) = match self
+            .msg
+            .deserialize::<nlmsghdr>(self.pos, self.msg.size.get())
+        {
             Ok((header, new_pos)) => (header, new_pos),
             Err(Error::Truncated) => {
                 self.pos = 0;
@@ -324,7 +329,7 @@ impl MsgBuffer {
             return Err(Error::Truncated);
         }
 
-        let header = unsafe { 
+        let header = unsafe {
             let bref = self.inner.borrow();
             let (prefix, header, suffix) = bref[start..start + mem::size_of::<T>()].align_to::<T>();
             assert_eq!(prefix.len(), 0);
@@ -338,13 +343,18 @@ impl MsgBuffer {
     }
 
     fn recv<T: AsRawFd>(&self, fd: &T) -> std::io::Result<()> {
-        let (read, _addr) = recvfrom::<NetlinkAddr>(fd.as_raw_fd(), self.inner.borrow_mut().deref_mut())?;
+        let (read, _addr) =
+            recvfrom::<NetlinkAddr>(fd.as_raw_fd(), self.inner.borrow_mut().deref_mut())?;
         // println!("Hello netlink : {:?} from {:?}", &self.inner[..read], _addr);
         self.size.replace(read);
         Ok(())
     }
 
     pub fn recv_msgs<T: AsRawFd>(&self, fd: &T) -> PartIterator<'_> {
-        PartIterator { pos: 0, msg: self, fd : fd.as_raw_fd() }
+        PartIterator {
+            pos: 0,
+            msg: self,
+            fd: fd.as_raw_fd(),
+        }
     }
 }

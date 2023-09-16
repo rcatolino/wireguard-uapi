@@ -1,12 +1,24 @@
 use nix::libc::{in_addr, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 
 use crate::netlink::{
-    wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
-    AttributeType, NestBuilder, NlSerializer,
+    self, wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
+    AttributeType, NestBuilder, NlSerializer, WG_GENL_NAME,
 };
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
+
+pub fn get_interfaces() -> Vec<(String, i32)> {
+    netlink::get_interfaces()
+        .into_iter()
+        .filter(|s| {
+            s.type_name
+                .as_ref()
+                .is_some_and(|t| t.as_bytes_with_nul() == WG_GENL_NAME)
+        })
+        .filter_map(|s| s.name.into_string().ok().map(|n| (n, s.index)))
+        .collect()
+}
 
 fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
     if bytes.len() == size_of::<sockaddr_in6>() {
