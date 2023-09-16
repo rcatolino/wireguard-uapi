@@ -1,6 +1,8 @@
-use wireguard_uapi::wireguard::get_interfaces;
+use nix::sys::socket::SockFlag;
+use wireguard_uapi::netlink::NetlinkRoute;
 
 #[test]
 fn get_ifs() {
-    println!("Interfaces : {:?}", get_interfaces());
+    let mut nlroute = NetlinkRoute::new(SockFlag::empty());
+    println!("Interfaces : {:?}", nlroute.get_wireguard_interfaces());
 }

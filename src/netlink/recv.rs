@@ -2,7 +2,7 @@ use nix::sys::socket::{recvfrom, NetlinkAddr};
 use std::cell::{Cell, Ref, RefCell};
 use std::ffi::{CStr, CString};
 use std::ops::DerefMut;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::{fmt, mem};
 
 use super::bindings::{
@@ -58,7 +58,7 @@ pub struct Attribute<'a> {
     payload_start: usize,
     payload_end: usize,
     pub attribute_type: AttributeType,
-    msg: &'a MsgBuffer,
+    msg: &'a MsgBuffer<'a>,
 }
 
 impl<'a> fmt::Debug for Attribute<'a> {
@@ -146,7 +146,7 @@ impl<'a> Attribute<'a> {
 pub struct AttributeIterator<'a> {
     pos: usize,
     end: usize,
-    msg: &'a MsgBuffer,
+    msg: &'a MsgBuffer<'a>,
 }
 
 impl<'a> Iterator for AttributeIterator<'a> {
@@ -178,7 +178,7 @@ pub struct MsgPart<'a> {
     pub sub_header: SubHeader,
     attributes_start: usize,
     attributes_end: usize,
-    msg: &'a MsgBuffer,
+    msg: &'a MsgBuffer<'a>,
 }
 
 impl MsgPart<'_> {
@@ -196,8 +196,7 @@ impl MsgPart<'_> {
 
 pub struct PartIterator<'a> {
     pos: usize,
-    msg: &'a MsgBuffer,
-    fd: RawFd,
+    msg: &'a MsgBuffer<'a>,
 }
 
 impl<'a> Iterator for PartIterator<'a> {
@@ -211,7 +210,7 @@ impl<'a> Iterator for PartIterator<'a> {
             Ok((header, new_pos)) => (header, new_pos),
             Err(Error::Truncated) => {
                 self.pos = 0;
-                self.msg.recv(&self.fd).unwrap();
+                self.msg.recv().unwrap();
                 return self.next(); // Restart with new data
             }
             Err(e) => return Some(Err(e)),
@@ -226,7 +225,7 @@ impl<'a> Iterator for PartIterator<'a> {
         }
 
         if (header.nlmsg_flags & bindings::NLM_F_DUMP_INTR) == bindings::NLM_F_DUMP_INTR {
-            println!("This dump has been interrupted");
+            println!("Warning, netlink dump has been interrupted");
         }
 
         if header.nlmsg_len as usize > available_size {
@@ -247,18 +246,16 @@ impl<'a> Iterator for PartIterator<'a> {
             let errno = i32::from_attr(&self.msg.inner.borrow()[self.pos..self.pos + 4]).unwrap();
             self.pos += mem::size_of_val(&errno);
             if errno < 0 {
-                println!("Received netlink error {}", errno);
-                Some(Err(Error::IoError(std::io::Error::from_raw_os_error(
-                    errno,
-                ))))
+                Some(Err(errno.into()))
             } else {
                 // it's not an error, but indicates success, lets skip this message
                 // Also, skip the copy of the header we sent that comes with the error message :
                 self.pos += nl_size_of_aligned::<nlmsghdr>();
+                println!("Netlink command no error");
                 None
             }
         } else if header.nlmsg_type == bindings::NLMSG_DONE {
-            println!("Multipart message is done");
+            assert_eq!(header.nlmsg_flags & bindings::NLM_F_MULTI, bindings::NLM_F_MULTI);
             None
         } else {
             let (sub_header, new_pos) = match self.msg.msg_type {
@@ -306,18 +303,20 @@ pub enum NetlinkType {
 
 #[derive(Debug)]
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
-pub struct MsgBuffer {
+pub struct MsgBuffer<'a> {
     pub inner: RefCell<[u8; 4096]>,
     size: Cell<usize>,
     msg_type: NetlinkType,
+    fd: BorrowedFd<'a>,
 }
 
-impl MsgBuffer {
-    pub fn new(msg_type: NetlinkType) -> Self {
+impl<'a> MsgBuffer<'a> {
+    pub fn new(msg_type: NetlinkType, fd: BorrowedFd<'a>) -> Self {
         MsgBuffer {
             inner: [0u8; 4096].into(),
             size: 0.into(),
             msg_type,
+            fd,
         }
     }
 
@@ -342,19 +341,15 @@ impl MsgBuffer {
         Ok((header, start + nl_size_of_aligned::<T>()))
     }
 
-    fn recv<T: AsRawFd>(&self, fd: &T) -> std::io::Result<()> {
+    fn recv(&self) -> std::io::Result<()> {
         let (read, _addr) =
-            recvfrom::<NetlinkAddr>(fd.as_raw_fd(), self.inner.borrow_mut().deref_mut())?;
+            recvfrom::<NetlinkAddr>(self.fd.as_raw_fd(), self.inner.borrow_mut().deref_mut())?;
         // println!("Hello netlink : {:?} from {:?}", &self.inner[..read], _addr);
         self.size.replace(read);
         Ok(())
     }
 
-    pub fn recv_msgs<T: AsRawFd>(&self, fd: &T) -> PartIterator<'_> {
-        PartIterator {
-            pos: 0,
-            msg: self,
-            fd: fd.as_raw_fd(),
-        }
+    pub fn recv_msgs(&self) -> PartIterator<'_> {
+        PartIterator { pos: 0, msg: self }
     }
 }

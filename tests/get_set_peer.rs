@@ -1,38 +1,31 @@
-use nix::sys::socket::{
-    bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
-};
+use nix::sys::socket::SockFlag;
 use std::ffi::CString;
-use std::os::fd::AsRawFd;
 use wireguard_uapi::netlink::{
-    self, wg_cmd, wgdevice_attribute, AttributeType, NetlinkType, NlSerializer,
+    self, wg_cmd, wgdevice_attribute, AttributeType, NetlinkGeneric, NetlinkRoute, NlSerializer,
 };
 use wireguard_uapi::wireguard::Peer;
 
 #[test]
 fn get_set_device() {
-    let s = socket(
-        AddressFamily::Netlink,
-        SockType::Raw,
-        SockFlag::empty(),
-        SockProtocol::NetlinkGeneric,
-    )
-    .unwrap();
+    // Get wireguard interface index :
+    let mut nlroute = NetlinkRoute::new(SockFlag::empty());
+    let (ifname, ifindex) = nlroute
+        .get_wireguard_interfaces()
+        .unwrap()
+        .pop()
+        .expect("No wireguard interface found");
 
-    bind(s.as_raw_fd(), &NetlinkAddr::new(0, 0)).unwrap();
-    let fid = netlink::get_family_id(netlink::WG_GENL_NAME, &s).unwrap();
-    println!("Familly id : {}", fid);
-
-    let mut get_dev_cmd = netlink::MsgBuilder::new(fid, 2)
-        .generic(wg_cmd::GET_DEVICE as u8)
+    println!("Using wireguard interface n°{} : {}", ifindex, ifname);
+    let mut nlgen = NetlinkGeneric::new(SockFlag::empty(), netlink::WG_GENL_NAME).unwrap();
+    let get_dev_cmd = nlgen
+        .build_message(wg_cmd::GET_DEVICE as u8)
         .dump()
-        .attr(wgdevice_attribute::IFINDEX as u16, 21u32);
+        .attr(wgdevice_attribute::IFINDEX as u16, ifindex as u32);
 
-    get_dev_cmd.sendto(&s).unwrap();
-    let buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
+    let buffer = nlgen.send(get_dev_cmd).unwrap();
     let mut mod_peer = None;
-    for mb_msg in buffer.recv_msgs(&s) {
+    for mb_msg in buffer.recv_msgs() {
         let msg = mb_msg.unwrap();
-        println!("Msg header {:?}", msg.header);
         for attribute in msg.attributes() {
             match attribute.attribute_type {
                 AttributeType::Raw(wgdevice_attribute::IFNAME) => {
@@ -57,17 +50,16 @@ fn get_set_device() {
     }
 
     println!("Re-setting peer : {:?}", mod_peer);
-    netlink::MsgBuilder::new(fid, 3)
-        .generic(wg_cmd::SET_DEVICE as u8)
-        .attr(wgdevice_attribute::IFINDEX as u16, 21u32)
+
+    let set_dev_cmd = nlgen
+        .build_message(wg_cmd::SET_DEVICE as u8)
+        .attr(wgdevice_attribute::IFINDEX as u16, ifindex as u32)
         .attr_list_start(wgdevice_attribute::PEERS as u16)
         .set_peer(mod_peer.as_ref().unwrap())
-        .attr_list_end()
-        .sendto(&s)
-        .unwrap();
+        .attr_list_end();
 
-    let buffer = netlink::MsgBuffer::new(NetlinkType::Generic(fid));
-    for mb_msg in buffer.recv_msgs(&s) {
+    let buffer = nlgen.send(set_dev_cmd).unwrap();
+    for mb_msg in buffer.recv_msgs() {
         match mb_msg {
             Err(e) => println!("Receive err resp : {:?}", e),
             Ok(msg) => {

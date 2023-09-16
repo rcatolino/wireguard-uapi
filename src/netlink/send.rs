@@ -142,7 +142,6 @@ impl<U: NlSerializer> NestBuilder<U> {
     pub fn attr_list_end(mut self) -> U {
         self.start_attr.nla_len = (self.pos() - self.start_pos) as u16;
         let write_head = self.write_obj_at(self.start_attr, self.start_pos);
-        // copy_to_slice!(self.buffer(), copy_at, self.start_attr, nlattr);
         println!(
             "Commiting nested attribute {} from {} to {} ({} bytes). Buffer pos : {}",
             self.start_attr.payload_type(),
@@ -232,8 +231,6 @@ impl MsgBuilder {
         // Serialize headers
         self.header.nlmsg_len = self.pos as u32;
         self.write_obj_at(self.header, 0);
-        println!("Sending Msg : {:?}", self.header);
-        println!("Sending buffer : {:02x?}", &self.inner[..self.pos]);
         Ok(sendto(
             fd.as_raw_fd(),
             &self.inner[..self.pos],
