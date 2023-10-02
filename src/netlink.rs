@@ -5,7 +5,7 @@ mod rt;
 mod send;
 
 pub use bindings::{
-    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, wgpeer_flag, WG_GENL_NAME,
+    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute, wgpeer_flag, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
 };
 
 pub use generic::NetlinkGeneric;
@@ -20,8 +20,16 @@ pub enum Error {
     MultipartNotDone,
     Interrupted,
     Invalid,
+    WrongGroupName,
+    InvalidGroupId,
     OsError(nix::errno::Errno),
     IoError(std::io::Error),
+}
+
+impl From<std::ffi::FromBytesWithNulError> for Error {
+    fn from(_value: std::ffi::FromBytesWithNulError) -> Self {
+        Error::WrongGroupName
+    }
 }
 
 impl From<nix::errno::Errno> for Error {

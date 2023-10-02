@@ -32,6 +32,8 @@ impl ParseCallbacks for CustomParser {
             Some(n.to_string())
         } else if let Some(n) = variant_name.strip_prefix("WG_CMD_") {
             Some(n.to_string())
+        } else if let Some(n) = variant_name.strip_prefix("WGDEVICE_MONITOR_F_") {
+            Some(n.to_string())
         } else {
             None
         }

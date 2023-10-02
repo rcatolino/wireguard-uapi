@@ -54,14 +54,14 @@ pub enum AttributeType {
     Raw(u32),
 }
 
-pub struct Attribute<'a> {
+pub struct Attribute<'a, T: AsRawFd> {
     payload_start: usize,
     payload_end: usize,
     pub attribute_type: AttributeType,
-    msg: &'a MsgBuffer<'a>,
+    msg: &'a MsgBuffer<T>,
 }
 
-impl<'a> fmt::Debug for Attribute<'a> {
+impl<'a, T: AsRawFd> fmt::Debug for Attribute<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.attribute_type {
             AttributeType::Nested(at) => {
@@ -88,8 +88,8 @@ impl<'a> fmt::Debug for Attribute<'a> {
     }
 }
 
-impl<'a> Attribute<'a> {
-    fn new(attr: bindings::nlattr, start: usize, msg: &'a MsgBuffer) -> Self {
+impl<'a, F: AsRawFd> Attribute<'a, F> {
+    fn new(attr: bindings::nlattr, start: usize, msg: &'a MsgBuffer<F>) -> Self {
         Attribute {
             payload_start: start,
             payload_end: start + attr.payload_length(),
@@ -127,7 +127,7 @@ impl<'a> Attribute<'a> {
 
     /// Returns an iterator over the sub-attributes.
     /// If the current attribute is not nested, the iterator will only yield None
-    pub fn attributes(&self) -> AttributeIterator<'a> {
+    pub fn attributes(&self) -> AttributeIterator<'a, F> {
         match self.attribute_type {
             AttributeType::Raw(_) => AttributeIterator {
                 pos: 0,
@@ -143,14 +143,14 @@ impl<'a> Attribute<'a> {
     }
 }
 
-pub struct AttributeIterator<'a> {
+pub struct AttributeIterator<'a, F: AsRawFd> {
     pos: usize,
     end: usize,
-    msg: &'a MsgBuffer<'a>,
+    msg: &'a MsgBuffer<F>,
 }
 
-impl<'a> Iterator for AttributeIterator<'a> {
-    type Item = Attribute<'a>;
+impl<'a, F: AsRawFd> Iterator for AttributeIterator<'a, F> {
+    type Item = Attribute<'a, F>;
     fn next(&mut self) -> Option<Self::Item> {
         let (attr, new_pos) = self.msg.deserialize::<nlattr>(self.pos, self.end).ok()?;
         if new_pos + nl_align_length(attr.payload_length()) > self.end {
@@ -173,19 +173,19 @@ pub enum SubHeader {
 }
 
 #[derive(Debug)]
-pub struct MsgPart<'a> {
+pub struct MsgPart<'a, F: AsRawFd> {
     pub header: nlmsghdr,
     pub sub_header: SubHeader,
     attributes_start: usize,
     attributes_end: usize,
-    msg: &'a MsgBuffer<'a>,
+    msg: &'a MsgBuffer<F>,
 }
 
-impl MsgPart<'_> {
+impl<F: AsRawFd> MsgPart<'_, F> {
     // Here we don't bind the lifetime of the attribute iterator to the lifetime of MsgPart's
     // buffer, because the attributes shouldn't outlive the inner buffer. They will point to
     // the wrong bytes if MsgBuffer::recv has been called after the attribute has been created.
-    pub fn attributes(&self) -> AttributeIterator<'_> {
+    pub fn attributes(&self) -> AttributeIterator<'_, F> {
         AttributeIterator {
             pos: self.attributes_start,
             end: self.attributes_end,
@@ -194,13 +194,13 @@ impl MsgPart<'_> {
     }
 }
 
-pub struct PartIterator<'a> {
+pub struct PartIterator<'a, F: AsRawFd> {
     pos: usize,
-    msg: &'a MsgBuffer<'a>,
+    msg: &'a MsgBuffer<F>,
 }
 
-impl<'a> Iterator for PartIterator<'a> {
-    type Item = Result<MsgPart<'a>>;
+impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
+    type Item = Result<MsgPart<'a, F>>;
     fn next(&mut self) -> Option<Self::Item> {
         let available_size = self.msg.size.get() - self.pos;
         let (header, new_pos) = match self
@@ -210,7 +210,9 @@ impl<'a> Iterator for PartIterator<'a> {
             Ok((header, new_pos)) => (header, new_pos),
             Err(Error::Truncated) => {
                 self.pos = 0;
-                self.msg.recv().unwrap();
+                if let Err(e) = self.msg.recv() {
+                    return Some(Err(Error::from(e)));
+                }
                 return self.next(); // Restart with new data
             }
             Err(e) => return Some(Err(e)),
@@ -250,8 +252,9 @@ impl<'a> Iterator for PartIterator<'a> {
             } else {
                 // it's not an error, but indicates success, lets skip this message
                 // Also, skip the copy of the header we sent that comes with the error message :
+                // TODO: the header copy is only sent if NLM_F_CAPPED is not in nlmsg_flags,
+                // maybe check this first ?
                 self.pos += nl_size_of_aligned::<nlmsghdr>();
-                println!("Netlink command no error");
                 None
             }
         } else if header.nlmsg_type == bindings::NLMSG_DONE {
@@ -303,15 +306,15 @@ pub enum NetlinkType {
 
 #[derive(Debug)]
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
-pub struct MsgBuffer<'a> {
+pub struct MsgBuffer<F: AsRawFd> {
     pub inner: RefCell<[u8; 4096]>,
     size: Cell<usize>,
     msg_type: NetlinkType,
-    fd: BorrowedFd<'a>,
+    fd: F
 }
 
-impl<'a> MsgBuffer<'a> {
-    pub fn new(msg_type: NetlinkType, fd: BorrowedFd<'a>) -> Self {
+impl<F: AsRawFd> MsgBuffer<F> {
+    pub fn new(msg_type: NetlinkType, fd: F) -> Self {
         MsgBuffer {
             inner: [0u8; 4096].into(),
             size: 0.into(),
@@ -349,7 +352,8 @@ impl<'a> MsgBuffer<'a> {
         Ok(())
     }
 
-    pub fn recv_msgs(&self) -> PartIterator<'_> {
+    /// Returns an iterator over all the messages in a multi part message
+    pub fn recv_msgs(&self) -> PartIterator<'_, F> {
         PartIterator { pos: 0, msg: self }
     }
 }

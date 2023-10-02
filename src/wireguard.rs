@@ -7,6 +7,7 @@ use crate::netlink::{
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
+use std::os::fd::AsRawFd;
 
 impl NetlinkRoute {
     pub fn get_wireguard_interfaces(&mut self) -> Result<Vec<(String, i32)>> {
@@ -51,7 +52,7 @@ fn parse_endpoint(bytes: &[u8]) -> Option<(IpAddr, u16)> {
     }
 }
 
-fn parse_allowed_ip(ip_attr: Attribute<'_>) -> Option<(IpAddr, u8)> {
+fn parse_allowed_ip<F: AsRawFd>(ip_attr: Attribute<'_, F>) -> Option<(IpAddr, u8)> {
     let mut bytes = None;
     let mut family = None;
     let mut mask = None;
@@ -103,7 +104,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(attributes: AttributeIterator<'_>) -> Option<Self> {
+    pub fn new<F: AsRawFd>(attributes: AttributeIterator<'_, F>) -> Option<Self> {
         let mut peer_key = Vec::new();
         let mut endpoint = None;
         let mut allowed_ips = Vec::new();
