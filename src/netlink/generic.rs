@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use std::ffi::{CString, CStr, c_void};
+use std::ffi::{CString, CStr};
 use std::os::fd::{AsFd, AsRawFd, OwnedFd, BorrowedFd};
 
 use super::recv::NetlinkType;
 use super::send::NlSerializer;
 use super::{bindings, AttributeType, Error, MsgBuffer, MsgBuilder, Result, Attribute};
-use nix::libc::setsockopt;
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
@@ -61,7 +60,7 @@ impl NetlinkGeneric {
         )?;
 
         let group_id_bit = match self.mcast_groups.get(CStr::from_bytes_with_nul(group_name)?) {
-            Some(id) if *id < 0x10 => return Err(Error::InvalidGroupId),
+            Some(id) if *id == 0 => return Err(Error::InvalidGroupId),
             Some(id) => id,
             None => return Err(Error::WrongGroupName),
         };

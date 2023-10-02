@@ -2,7 +2,7 @@ use nix::sys::socket::{recvfrom, NetlinkAddr};
 use std::cell::{Cell, Ref, RefCell};
 use std::ffi::{CStr, CString};
 use std::ops::DerefMut;
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::os::fd::AsRawFd;
 use std::{fmt, mem};
 
 use super::bindings::{

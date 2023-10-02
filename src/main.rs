@@ -1,5 +1,6 @@
 use nix::sys::socket::SockFlag;
-use wireguard_uapi::netlink::{NetlinkRoute, NlSerializer, WG_MULTICAST_GROUP_PEERS, WG_GENL_NAME, NetlinkGeneric, wg_cmd, wgdevice_attribute, wgdevice_monitor_flag};
+use wireguard_uapi::netlink::{AttributeType, NetlinkRoute, NlSerializer, WG_MULTICAST_GROUP_PEERS, WG_GENL_NAME, NetlinkGeneric, wg_cmd, wgdevice_attribute, wgdevice_monitor_flag};
+use wireguard_uapi::wireguard::Peer;
 
 fn main() {
     // Get wireguard interface index :
@@ -32,7 +33,15 @@ fn main() {
     loop {
         for mb_msg in sub.recv_msgs() {
             for attr in mb_msg.unwrap().attributes() {
-                println!("wg event attribute : {:?}", attr);
+                match attr.attribute_type { 
+                    AttributeType::Nested(wgdevice_attribute::PEERS) => {
+                        for pa in attr.attributes().map(|p| p.attributes()) {
+                            let p = Peer::new(pa);
+                            println!("New peer info : {:?}", p);
+                        }
+                    }
+                    _ => println!("wg event attribute : {:?}", attr),
+                }
             }
         }
     }
