@@ -5,12 +5,13 @@ mod rt;
 mod send;
 
 pub use bindings::{
-    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute, wgpeer_flag, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
+    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute,
+    wgpeer_flag, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
 };
 
 pub use generic::NetlinkGeneric;
 use nix;
-pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer, NetlinkType};
+pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer, NetlinkType, SubHeader};
 pub use rt::{IfLink, NetlinkRoute};
 pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
 

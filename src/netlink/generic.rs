@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::ffi::{CString, CStr};
-use std::os::fd::{AsFd, AsRawFd, OwnedFd, BorrowedFd};
+use std::ffi::{CStr, CString};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
 use super::recv::NetlinkType;
 use super::send::NlSerializer;
-use super::{bindings, AttributeType, Error, MsgBuffer, MsgBuilder, Result, Attribute};
+use super::{bindings, Attribute, AttributeType, Error, MsgBuffer, MsgBuilder, Result};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
@@ -51,7 +51,11 @@ impl NetlinkGeneric {
     }
 
     /// Creates and returns a new netlink socket subscribed to the specified multicast group
-    pub fn subscribe<'a>(&'a self, flags: SockFlag, group_name: &[u8]) -> Result<MsgBuffer<OwnedFd>> {
+    pub fn subscribe<'a>(
+        &'a self,
+        flags: SockFlag,
+        group_name: &[u8],
+    ) -> Result<MsgBuffer<OwnedFd>> {
         let fd = socket(
             AddressFamily::Netlink,
             SockType::Raw,
@@ -59,20 +63,20 @@ impl NetlinkGeneric {
             SockProtocol::NetlinkGeneric,
         )?;
 
-        let group_id_bit = match self.mcast_groups.get(CStr::from_bytes_with_nul(group_name)?) {
+        let group_id_bit = match self
+            .mcast_groups
+            .get(CStr::from_bytes_with_nul(group_name)?)
+        {
             Some(id) if *id == 0 => return Err(Error::InvalidGroupId),
             Some(id) => id,
             None => return Err(Error::WrongGroupName),
         };
 
-        let group_id = 1u32 << (group_id_bit-1);
+        let group_id = 1u32 << (group_id_bit - 1);
 
         println!("Subscribing to group id : {}", group_id);
         bind(fd.as_raw_fd(), &NetlinkAddr::new(0, group_id)).unwrap();
-        let subscriber = MsgBuffer::new(
-            NetlinkType::Generic(self.family),
-            fd,
-        );
+        let subscriber = MsgBuffer::new(NetlinkType::Generic(self.family), fd);
 
         Ok(subscriber)
     }
@@ -85,7 +89,9 @@ impl NetlinkGeneric {
             let mut name = None;
             for item in att.make_nested().attributes() {
                 match item.attribute_type {
-                    AttributeType::Raw(bindings::CTRL_ATTR_MCAST_GRP_NAME) => name = item.get::<CString>(),
+                    AttributeType::Raw(bindings::CTRL_ATTR_MCAST_GRP_NAME) => {
+                        name = item.get::<CString>()
+                    }
                     AttributeType::Raw(bindings::CTRL_ATTR_MCAST_GRP_ID) => id = item.get::<u32>(),
                     _ => (),
                 }
@@ -95,7 +101,10 @@ impl NetlinkGeneric {
                 (Some(gid), Some(gname)) => {
                     groups.insert(gname, gid);
                 }
-                _ => println!("Ignoring multicast group {:?} because of missing attribute", att),
+                _ => println!(
+                    "Ignoring multicast group {:?} because of missing attribute",
+                    att
+                ),
             };
         }
     }
@@ -115,7 +124,9 @@ impl NetlinkGeneric {
                     AttributeType::Raw(bindings::CTRL_ATTR_FAMILY_ID) => {
                         fid = attr.get::<u16>();
                     }
-                    AttributeType::Raw(bindings::CTRL_ATTR_MCAST_GROUPS) => Self::add_mcast_groups(&mut groups, attr),
+                    AttributeType::Raw(bindings::CTRL_ATTR_MCAST_GROUPS) => {
+                        Self::add_mcast_groups(&mut groups, attr)
+                    }
                     _ => (),
                 }
             }

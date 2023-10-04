@@ -1,6 +1,32 @@
+use std::ffi::CString;
+use std::os::fd::AsRawFd;
+
 use nix::sys::socket::SockFlag;
-use wireguard_uapi::netlink::{AttributeType, NetlinkRoute, NlSerializer, WG_MULTICAST_GROUP_PEERS, WG_GENL_NAME, NetlinkGeneric, wg_cmd, wgdevice_attribute, wgdevice_monitor_flag};
+use wireguard_uapi::netlink::{
+    wg_cmd, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute, AttributeIterator,
+    AttributeType, NetlinkGeneric, NetlinkRoute, NlSerializer, SubHeader, WG_GENL_NAME,
+    WG_MULTICAST_GROUP_PEERS,
+};
+
 use wireguard_uapi::wireguard::Peer;
+
+fn print_peer<F: AsRawFd>(attributes: AttributeIterator<'_, F>) {
+    for a in attributes {
+        match a.attribute_type {
+            AttributeType::Nested(wgdevice_attribute::PEER) => {
+                let p = Peer::new(a.attributes());
+                println!("Peer {:?}", p);
+            }
+            AttributeType::Raw(wgdevice_attribute::IFINDEX) => {
+                println!("Ifindex : {:?}", a.get::<u32>());
+            }
+            AttributeType::Raw(wgdevice_attribute::IFNAME) => {
+                println!("Ifname : {:?}", a.get::<CString>());
+            }
+            _ => (),
+        }
+    }
+}
 
 fn main() {
     // Get wireguard interface index :
@@ -18,7 +44,10 @@ fn main() {
     let set_monitor_cmd = nlgen
         .build_message(wg_cmd::SET_DEVICE as u8)
         .attr(wgdevice_attribute::IFINDEX as u16, ifindex as u32)
-        .attr(wgdevice_attribute::MONITOR as u16, wgdevice_monitor_flag::ENDPOINT as u8);
+        .attr(
+            wgdevice_attribute::MONITOR as u16,
+            (0 | wgdevice_monitor_flag::PEERS) as u8,
+        );
 
     let resp = nlgen.send(set_monitor_cmd).unwrap();
     for mb_msg in resp.recv_msgs() {
@@ -29,19 +58,40 @@ fn main() {
 
     println!("Listening to wireguard events");
 
-    let sub = nlgen.subscribe(SockFlag::empty(), WG_MULTICAST_GROUP_PEERS).unwrap();
+    let sub = nlgen
+        .subscribe(SockFlag::empty(), WG_MULTICAST_GROUP_PEERS)
+        .unwrap();
     loop {
-        for mb_msg in sub.recv_msgs() {
-            for attr in mb_msg.unwrap().attributes() {
-                match attr.attribute_type { 
-                    AttributeType::Nested(wgdevice_attribute::PEERS) => {
-                        for pa in attr.attributes().map(|p| p.attributes()) {
-                            let p = Peer::new(pa);
-                            println!("New peer info : {:?}", p);
+        for msg in sub.recv_msgs().map(|m| m.unwrap()) {
+            match msg.sub_header {
+                SubHeader::Generic(genheader) if genheader.cmd == 2 => {
+                    println!("Set peer endpoint notification");
+                    print_peer(msg.attributes());
+                }
+                SubHeader::Generic(genheader) if genheader.cmd == 3 => {
+                    for a in msg.attributes() {
+                        match a.attribute_type {
+                            AttributeType::Nested(wgdevice_attribute::PEER) => {
+                                a.attributes().find_map(|inner| match inner.attribute_type {
+                                    AttributeType::Raw(wgpeer_attribute::PUBLIC_KEY) => {
+                                        println!("Removing peer {:?}", a.get_bytes());
+                                        Some(())
+                                    }
+                                    _ => None,
+                                });
+                            }
+                            AttributeType::Raw(wgdevice_attribute::IFINDEX) => {
+                                println!("Ifindex : {:?}", a.get::<u32>());
+                            }
+                            _ => (),
                         }
                     }
-                    _ => println!("wg event attribute : {:?}", attr),
                 }
+                SubHeader::Generic(genheader) if genheader.cmd == 4 => {
+                    println!("Set peer notification");
+                    print_peer(msg.attributes());
+                }
+                _ => println!("Unknwon wireguard notification"),
             }
         }
     }

@@ -258,7 +258,10 @@ impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
                 None
             }
         } else if header.nlmsg_type == bindings::NLMSG_DONE {
-            assert_eq!(header.nlmsg_flags & bindings::NLM_F_MULTI, bindings::NLM_F_MULTI);
+            assert_eq!(
+                header.nlmsg_flags & bindings::NLM_F_MULTI,
+                bindings::NLM_F_MULTI
+            );
             None
         } else {
             let (sub_header, new_pos) = match self.msg.msg_type {
@@ -310,7 +313,7 @@ pub struct MsgBuffer<F: AsRawFd> {
     pub inner: RefCell<[u8; 4096]>,
     size: Cell<usize>,
     msg_type: NetlinkType,
-    fd: F
+    fd: F,
 }
 
 impl<F: AsRawFd> MsgBuffer<F> {
