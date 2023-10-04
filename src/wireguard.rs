@@ -1,8 +1,9 @@
 use nix::libc::{in_addr, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
+use nix::sys::socket::SockFlag;
 
 use crate::netlink::{
     wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
-    AttributeType, NestBuilder, NetlinkRoute, NlSerializer, Result, WG_GENL_NAME,
+    AttributeType, NestBuilder, NetlinkRoute, NlSerializer, Result, WG_GENL_NAME, NetlinkGeneric, Error, wg_cmd, wgdevice_attribute,
 };
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -190,7 +191,7 @@ impl<T: NlSerializer> NestBuilder<T> {
     }
 
     #[allow(clippy::unnecessary_cast)]
-    pub fn remove_peer(self, peer: &Peer) -> Self {
+    pub fn remove_peer(self, peer_key: &[u8]) -> Self {
         self.attr_list_start(0)
             .attr(
                 wgpeer_attribute::FLAGS as u16,
@@ -198,7 +199,7 @@ impl<T: NlSerializer> NestBuilder<T> {
             )
             .attr_bytes(
                 wgpeer_attribute::PUBLIC_KEY as u16,
-                peer.peer_key.as_slice(),
+                peer_key,
             )
             .attr_list_end()
     }
@@ -226,3 +227,120 @@ impl<T: NlSerializer> NestBuilder<T> {
         attr_list.attr_list_end()
     }
 }
+
+/// Struct representing a wireguard interface on the system
+pub struct WireguardDev {
+    wgnl: NetlinkGeneric,
+    pub name: String,
+    index: i32,
+}
+
+impl WireguardDev {
+    pub fn new(ifname_filter: Option<&str>) -> Result<Self> {
+        let mut nlroute = NetlinkRoute::new(SockFlag::empty());
+        let mut interfaces = nlroute.get_wireguard_interfaces()?.into_iter();
+
+        let (name, index) = if let Some(ifname) = ifname_filter {
+            match interfaces.find(|(name, _)| name == &ifname) {
+                Some(interface) => interface,
+                None => {
+                    let msg = format!("No wireguard interface named {} found", ifname);
+                    return Err(Error::Other(msg))
+                }
+            }
+        } else {
+            let res = match interfaces.next() {
+                Some(r) => r,
+                None => {
+                    let msg = "No wireguard interfaces found".to_string();
+                    return Err(Error::Other(msg));
+                }
+            };
+
+            if interfaces.count() > 0 {
+                let msg = "Multiple wireguard interfaces found,
+                          please specify an interface name manually"
+                    .to_string();
+                return Err(Error::Other(msg));
+            }
+
+            res
+        };
+
+        Ok(WireguardDev {
+            wgnl: NetlinkGeneric::new(SockFlag::empty(), WG_GENL_NAME).unwrap(),
+            name,
+            index
+        })
+    }
+
+    fn parse_peers<F: AsRawFd>(list: AttributeIterator<'_, F>) -> Vec<Peer> {
+        list.filter_map(|peer_attrs| {
+            Peer::new(peer_attrs.attributes())
+        }).collect()
+    }
+
+    pub fn get_peers(&mut self) -> Result<Vec<Peer>> {
+        let get_dev_cmd = self.wgnl
+            .build_message(wg_cmd::GET_DEVICE as u8)
+            .dump()
+            .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32);
+
+        let buffer = self.wgnl.send(get_dev_cmd)?;
+        for msg in buffer.recv_msgs() {
+            for attr in msg?.attributes() {
+                match attr.attribute_type {
+                    AttributeType::Nested(wgdevice_attribute::PEERS) => {
+                        return Ok(Self::parse_peers(attr.attributes()))
+                    }
+                    _ => (),
+                }
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
+    pub fn set_peers(&mut self, peers: &[Peer]) -> Result<()> {
+        let mut peer_nest = self.wgnl
+            .build_message(wg_cmd::SET_DEVICE as u8)
+            .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
+            .attr_list_start(wgdevice_attribute::PEERS as u16);
+
+        for p in peers {
+            peer_nest = peer_nest.set_peer(p)
+        }
+
+        let set_dev_cmd = peer_nest.attr_list_end();
+        let buffer = self.wgnl.send(set_dev_cmd).unwrap();
+        for mb_msg in buffer.recv_msgs() {
+            match mb_msg {
+                Err(e) => return Err(e),
+                _ => (),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_peer(&mut self, peer_key: &[u8]) -> Result<()> {
+        let set_dev_cmd = self.wgnl
+            .build_message(wg_cmd::SET_DEVICE as u8)
+            .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
+            .attr_list_start(wgdevice_attribute::PEERS as u16)
+            .remove_peer(peer_key)
+            .attr_list_end();
+
+        let buffer = self.wgnl.send(set_dev_cmd).unwrap();
+        for mb_msg in buffer.recv_msgs() {
+            match mb_msg {
+                Err(e) => return Err(e),
+                _ => (),
+            }
+        }
+
+        Ok(())
+    }
+
+}
+
