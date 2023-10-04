@@ -218,6 +218,7 @@ impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
             Err(e) => return Some(Err(e)),
         };
 
+        /*
         if (header.nlmsg_flags & bindings::NLM_F_MULTI) == bindings::NLM_F_MULTI {
             println!("We got ourselves some multipart stuff");
         }
@@ -225,6 +226,7 @@ impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
         if (header.nlmsg_flags & bindings::NLM_F_DUMP_FILTERED) == bindings::NLM_F_DUMP_FILTERED {
             println!("This dump has been filtered");
         }
+        */
 
         if (header.nlmsg_flags & bindings::NLM_F_DUMP_INTR) == bindings::NLM_F_DUMP_INTR {
             println!("Warning, netlink dump has been interrupted");
