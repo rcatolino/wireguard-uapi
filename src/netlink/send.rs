@@ -141,17 +141,18 @@ impl<U: NlSerializer> NlSerializer for NestBuilder<U> {
 impl<U: NlSerializer> NestBuilder<U> {
     pub fn attr_list_end(mut self) -> U {
         self.start_attr.nla_len = (self.pos() - self.start_pos) as u16;
-        let write_head = self.write_obj_at(self.start_attr, self.start_pos);
+        let _write_head = self.write_obj_at(self.start_attr, self.start_pos);
+        /*
         println!(
             "Commiting nested attribute {} from {} to {} ({} bytes). Buffer pos : {}",
             self.start_attr.payload_type(),
             self.start_pos,
-            write_head,
+            _write_head,
             self.start_attr.nla_len,
             self.pos(),
         );
+        */
 
-        // self.seek(copy_size);
         self.upper
     }
 }
