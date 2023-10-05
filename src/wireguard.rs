@@ -304,7 +304,10 @@ impl WireguardDev {
         Ok(Vec::new())
     }
 
-    pub fn set_peers(&mut self, peers: &[Peer]) -> Result<()> {
+    pub fn set_peers<'a, I>(&mut self, peers: I) -> Result<()>
+    where
+        I: IntoIterator<Item = &'a Peer>,
+    {
         let mut peer_nest = self.wgnl
             .build_message(wg_cmd::SET_DEVICE as u8)
             .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
