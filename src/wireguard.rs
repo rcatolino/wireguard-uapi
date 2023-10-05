@@ -1,3 +1,5 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use nix::libc::{in_addr, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 use nix::sys::socket::SockFlag;
 
@@ -97,6 +99,7 @@ fn parse_allowed_ip<F: AsRawFd>(ip_attr: Attribute<'_, F>) -> Option<(IpAddr, u8
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Peer {
     pub peer_key: Vec<u8>,
     pub endpoint: (IpAddr, u16),
