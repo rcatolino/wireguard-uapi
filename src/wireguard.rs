@@ -1,11 +1,12 @@
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use nix::libc::{in_addr, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 use nix::sys::socket::SockFlag;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::netlink::{
-    wgallowedip_attribute, wgpeer_attribute, wgpeer_flag, Attribute, AttributeIterator,
-    AttributeType, NestBuilder, NetlinkRoute, NlSerializer, Result, WG_GENL_NAME, NetlinkGeneric, Error, wg_cmd, wgdevice_attribute,
+    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, wgpeer_flag, Attribute,
+    AttributeIterator, AttributeType, Error, NestBuilder, NetlinkGeneric, NetlinkRoute,
+    NlSerializer, Result, WG_GENL_NAME,
 };
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -200,10 +201,7 @@ impl<T: NlSerializer> NestBuilder<T> {
                 wgpeer_attribute::FLAGS as u16,
                 wgpeer_flag::REMOVE_ME as u32,
             )
-            .attr_bytes(
-                wgpeer_attribute::PUBLIC_KEY as u16,
-                peer_key,
-            )
+            .attr_bytes(wgpeer_attribute::PUBLIC_KEY as u16, peer_key)
             .attr_list_end()
     }
 
@@ -248,7 +246,7 @@ impl WireguardDev {
                 Some(interface) => interface,
                 None => {
                     let msg = format!("No wireguard interface named {} found", ifname);
-                    return Err(Error::Other(msg))
+                    return Err(Error::Other(msg));
                 }
             }
         } else {
@@ -273,18 +271,18 @@ impl WireguardDev {
         Ok(WireguardDev {
             wgnl: NetlinkGeneric::new(SockFlag::empty(), WG_GENL_NAME).unwrap(),
             name,
-            index
+            index,
         })
     }
 
     fn parse_peers<F: AsRawFd>(list: AttributeIterator<'_, F>) -> Vec<Peer> {
-        list.filter_map(|peer_attrs| {
-            Peer::new(peer_attrs.attributes())
-        }).collect()
+        list.filter_map(|peer_attrs| Peer::new(peer_attrs.attributes()))
+            .collect()
     }
 
     pub fn get_peers(&mut self) -> Result<Vec<Peer>> {
-        let get_dev_cmd = self.wgnl
+        let get_dev_cmd = self
+            .wgnl
             .build_message(wg_cmd::GET_DEVICE as u8)
             .dump()
             .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32);
@@ -308,7 +306,8 @@ impl WireguardDev {
     where
         I: IntoIterator<Item = &'a Peer>,
     {
-        let mut peer_nest = self.wgnl
+        let mut peer_nest = self
+            .wgnl
             .build_message(wg_cmd::SET_DEVICE as u8)
             .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
             .attr_list_start(wgdevice_attribute::PEERS as u16);
@@ -330,7 +329,8 @@ impl WireguardDev {
     }
 
     pub fn remove_peer(&mut self, peer_key: &[u8]) -> Result<()> {
-        let set_dev_cmd = self.wgnl
+        let set_dev_cmd = self
+            .wgnl
             .build_message(wg_cmd::SET_DEVICE as u8)
             .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
             .attr_list_start(wgdevice_attribute::PEERS as u16)
@@ -347,6 +347,4 @@ impl WireguardDev {
 
         Ok(())
     }
-
 }
-

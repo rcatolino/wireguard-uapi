@@ -1,3 +1,10 @@
+#[cfg(feature = "mio")]
+mod mio {
+    pub use mio::event::Source as MioSource;
+    pub use mio::unix::SourceFd;
+    pub use mio::{Interest, Registry, Token};
+}
+
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
@@ -14,6 +21,31 @@ pub struct NetlinkGeneric {
     seq: u32,
     family: u16,
     pub mcast_groups: HashMap<CString, u32>,
+}
+
+#[cfg(feature = "mio")]
+impl mio::MioSource for NetlinkGeneric {
+    fn register(
+        &mut self,
+        registry: &mio::Registry,
+        token: mio::Token,
+        interests: mio::Interest,
+    ) -> std::io::Result<()> {
+        mio::SourceFd(&self.fd.as_raw_fd()).register(registry, token, interests)
+    }
+
+    fn reregister(
+        &mut self,
+        registry: &mio::Registry,
+        token: mio::Token,
+        interests: mio::Interest,
+    ) -> std::io::Result<()> {
+        mio::SourceFd(&self.fd.as_raw_fd()).reregister(registry, token, interests)
+    }
+
+    fn deregister(&mut self, registry: &mio::Registry) -> std::io::Result<()> {
+        mio::SourceFd(&self.fd.as_raw_fd()).deregister(registry)
+    }
 }
 
 impl NetlinkGeneric {
