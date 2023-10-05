@@ -1,3 +1,10 @@
+#[cfg(feature = "mio")]
+mod mio {
+    pub use mio::event::Source as MioSource;
+    pub use mio::unix::SourceFd;
+    pub use mio::{Interest, Registry, Token};
+}
+
 use nix::sys::socket::{recvfrom, NetlinkAddr};
 use std::cell::{Cell, Ref, RefCell};
 use std::ffi::{CStr, CString};
@@ -362,3 +369,30 @@ impl<F: AsRawFd> MsgBuffer<F> {
         PartIterator { pos: 0, msg: self }
     }
 }
+
+#[cfg(feature = "mio")]
+impl<F: AsRawFd> mio::MioSource for MsgBuffer<F> {
+    fn register(
+        &mut self,
+        registry: &mio::Registry,
+        token: mio::Token,
+        interests: mio::Interest,
+    ) -> std::io::Result<()> {
+        mio::SourceFd(&self.fd.as_raw_fd()).register(registry, token, interests)
+    }
+
+    fn reregister(
+        &mut self,
+        registry: &mio::Registry,
+        token: mio::Token,
+        interests: mio::Interest,
+    ) -> std::io::Result<()> {
+        mio::SourceFd(&self.fd.as_raw_fd()).reregister(registry, token, interests)
+    }
+
+    fn deregister(&mut self, registry: &mio::Registry) -> std::io::Result<()> {
+        mio::SourceFd(&self.fd.as_raw_fd()).deregister(registry)
+    }
+}
+
+

@@ -4,14 +4,14 @@ use nix::sys::socket::SockFlag;
 use serde::{Deserialize, Serialize};
 
 use crate::netlink::{
-    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgpeer_attribute, wgpeer_flag, Attribute,
-    AttributeIterator, AttributeType, Error, NestBuilder, NetlinkGeneric, NetlinkRoute,
-    NlSerializer, Result, WG_GENL_NAME,
+    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute,
+    wgpeer_flag, Attribute, AttributeIterator, AttributeType, Error, MsgBuffer, NestBuilder,
+    NetlinkGeneric, NetlinkRoute, NlSerializer, Result, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
 };
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 
 impl NetlinkRoute {
     pub fn get_wireguard_interfaces(&mut self) -> Result<Vec<(String, i32)>> {
@@ -346,5 +346,25 @@ impl WireguardDev {
         }
 
         Ok(())
+    }
+
+    pub fn subscribe(&mut self) -> Result<MsgBuffer<OwnedFd>> {
+        let set_monitor_cmd = self.wgnl
+            .build_message(wg_cmd::SET_DEVICE as u8)
+            .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
+            .attr(
+                wgdevice_attribute::MONITOR as u16,
+                (wgdevice_monitor_flag::ENDPOINT | wgdevice_monitor_flag::PEERS) as u8,
+            );
+
+        let resp = self.wgnl.send(set_monitor_cmd).unwrap();
+        for mb_msg in resp.recv_msgs() {
+            for attr in mb_msg.unwrap().attributes() {
+                println!("wg event attribute : {:?}", attr);
+            }
+        }
+
+        self.wgnl
+            .subscribe(SockFlag::empty(), WG_MULTICAST_GROUP_PEERS)
     }
 }
