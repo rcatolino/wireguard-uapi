@@ -348,7 +348,7 @@ impl WireguardDev {
         Ok(())
     }
 
-    pub fn subscribe(&mut self) -> Result<MsgBuffer<OwnedFd>> {
+    pub fn subscribe(&mut self, flags: SockFlag,) -> Result<MsgBuffer<OwnedFd>> {
         let set_monitor_cmd = self.wgnl
             .build_message(wg_cmd::SET_DEVICE as u8)
             .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
@@ -364,7 +364,6 @@ impl WireguardDev {
             }
         }
 
-        self.wgnl
-            .subscribe(SockFlag::empty(), WG_MULTICAST_GROUP_PEERS)
+        self.wgnl.subscribe(flags, WG_MULTICAST_GROUP_PEERS)
     }
 }
