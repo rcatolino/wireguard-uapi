@@ -233,7 +233,7 @@ impl<T: NlSerializer> NestBuilder<T> {
 pub struct WireguardDev {
     wgnl: NetlinkGeneric,
     pub name: String,
-    index: i32,
+    pub index: i32,
 }
 
 impl WireguardDev {
@@ -348,8 +348,9 @@ impl WireguardDev {
         Ok(())
     }
 
-    pub fn subscribe(&mut self, flags: SockFlag,) -> Result<MsgBuffer<OwnedFd>> {
-        let set_monitor_cmd = self.wgnl
+    pub fn subscribe(&mut self, flags: SockFlag) -> Result<MsgBuffer<OwnedFd>> {
+        let set_monitor_cmd = self
+            .wgnl
             .build_message(wg_cmd::SET_DEVICE as u8)
             .attr(wgdevice_attribute::IFINDEX as u16, self.index as u32)
             .attr(

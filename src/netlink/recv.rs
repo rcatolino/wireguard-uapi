@@ -394,5 +394,3 @@ impl<F: AsRawFd> mio::MioSource for MsgBuffer<F> {
         mio::SourceFd(&self.fd.as_raw_fd()).deregister(registry)
     }
 }
-
-
