@@ -104,7 +104,7 @@ fn parse_allowed_ip<F: AsRawFd>(ip_attr: Attribute<'_, F>) -> Option<(IpAddr, u8
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Peer {
     pub peer_key: Vec<u8>,
-    pub endpoint: (IpAddr, u16),
+    pub endpoint: Option<(IpAddr, u16)>,
     pub allowed_ips: Vec<(IpAddr, u8)>,
     pub keepalive: Option<u16>,
 }
@@ -116,16 +116,17 @@ pub mod display {
 
     impl Display for super::Peer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "{} @ [{:?}]:{}, allowed ips : ",
-                base64_encode_bytes(self.peer_key.as_slice()),
-                self.endpoint.0,
-                self.endpoint.1
-            )?;
+            write!(f, "{}", base64_encode_bytes(self.peer_key.as_slice()))?;
 
-            for ip in self.allowed_ips.iter() {
-                write!(f, "{}/{}, ", ip.0, ip.1)?;
+            if let Some(ep) = self.endpoint {
+                write!(f, ", @ [{:?}]:{}", ep.0, ep.1)?;
+            }
+
+            if self.allowed_ips.len() > 0 {
+                write!(f, ", allowed_ips : ")?;
+                for ip in self.allowed_ips.iter() {
+                    write!(f, "{}/{}, ", ip.0, ip.1)?;
+                }
             }
 
             if let Some(ka) = self.keepalive {
@@ -166,7 +167,7 @@ impl Peer {
 
         Some(Peer {
             peer_key,
-            endpoint: endpoint?,
+            endpoint,
             allowed_ips,
             keepalive,
         })
@@ -244,10 +245,13 @@ impl<T: NlSerializer> NestBuilder<T> {
                 wgpeer_attribute::PUBLIC_KEY as u16,
                 peer.peer_key.as_slice(),
             )
-            .attr_endpoint(wgpeer_attribute::ENDPOINT as u16, peer.endpoint)
             .attr_list_start(wgpeer_attribute::ALLOWEDIPS as u16)
             .set_allowed_ips(&peer.allowed_ips)
             .attr_list_end();
+
+        if let Some(endpoint) = peer.endpoint {
+            attr_list = attr_list.attr_endpoint(wgpeer_attribute::ENDPOINT as u16, endpoint)
+        }
 
         if let Some(keepalive) = peer.keepalive {
             attr_list = attr_list.attr(
@@ -322,7 +326,7 @@ impl WireguardDev {
         for msg in buffer.recv_msgs() {
             for attr in msg?.attributes() {
                 if let AttributeType::Nested(wgdevice_attribute::PEERS) = attr.attribute_type {
-                    return Ok(Self::parse_peers(attr.attributes()))
+                    return Ok(Self::parse_peers(attr.attributes()));
                 }
             }
         }

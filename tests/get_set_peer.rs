@@ -38,7 +38,7 @@ fn get_set_device() {
                         let p = Peer::new(peer_attr);
                         println!("New peer : {:?}", p);
                         if let Some(mut peer) = p {
-                            peer.endpoint.1 = 53476;
+                            peer.endpoint.iter_mut().for_each(|ep| ep.1 = 53476);
                             mod_peer = Some(peer);
                         }
                     }
