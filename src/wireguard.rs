@@ -8,6 +8,7 @@ use crate::netlink::{
     wgpeer_flag, Attribute, AttributeIterator, AttributeType, Error, MsgBuffer, NestBuilder,
     NetlinkGeneric, NetlinkRoute, NlSerializer, Result, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
 };
+
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
@@ -106,6 +107,34 @@ pub struct Peer {
     pub endpoint: (IpAddr, u16),
     pub allowed_ips: Vec<(IpAddr, u8)>,
     pub keepalive: Option<u16>,
+}
+
+#[cfg(feature = "display")]
+pub mod display {
+    use base64_light::base64_encode_bytes;
+    use std::fmt::Display;
+
+    impl Display for super::Peer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f,
+                   "{} @ [{:?}]:{}, allowed ips : ",
+                   base64_encode_bytes(self.peer_key.as_slice()),
+                   self.endpoint.0,
+                   self.endpoint.1)?;
+
+            for ip in self.allowed_ips.iter() {
+                write!(f, "{}/{}, ", ip.0, ip.1)?;
+            }
+
+            if let Some(ka) = self.keepalive {
+                write!(f, "keepalive : {}", ka)?;
+            } else {
+                write!(f, "keepalive : None")?;
+            }
+
+            Ok(())
+        }
+    }
 }
 
 impl Peer {

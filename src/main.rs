@@ -15,6 +15,11 @@ fn print_peer<F: AsRawFd>(attributes: AttributeIterator<'_, F>) {
         match a.attribute_type {
             AttributeType::Nested(wgdevice_attribute::PEER) => {
                 let p = Peer::new(a.attributes());
+                #[cfg(feature = "display")]
+                if let Some(peer) = p {
+                    println!("Peer {}", peer);
+                }
+                #[cfg(not(feature = "display"))]
                 println!("Peer {:?}", p);
             }
             AttributeType::Raw(wgdevice_attribute::IFINDEX) => {
