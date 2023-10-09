@@ -55,6 +55,9 @@ impl ToAttr for u32 {
     }
 }
 
+/// Trait bound used to mark types can can be safely copied into netlink buffers.
+/// # Safety
+/// This trait can be implemented for types that are `repr[C]`
 pub unsafe trait ReprC {}
 unsafe impl ReprC for nlattr {}
 unsafe impl ReprC for genlmsghdr {}
@@ -96,7 +99,7 @@ pub trait NlSerializer {
         let buf = unsafe {
             slice::from_raw_parts((&payload as *const T) as *const u8, mem::size_of::<T>())
         };
-        self.buffer()[pos..pos + mem::size_of::<T>()].copy_from_slice(&buf);
+        self.buffer()[pos..pos + mem::size_of::<T>()].copy_from_slice(buf);
         pos + nl_size_of_aligned::<T>()
     }
 

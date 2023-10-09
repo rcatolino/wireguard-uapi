@@ -51,8 +51,8 @@ impl NetlinkGeneric {
     }
 
     /// Creates and returns a new netlink socket subscribed to the specified multicast group
-    pub fn subscribe<'a>(
-        &'a self,
+    pub fn subscribe(
+        &self,
         flags: SockFlag,
         group_name: &[u8],
     ) -> Result<MsgBuffer<OwnedFd>> {

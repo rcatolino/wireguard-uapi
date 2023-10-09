@@ -51,7 +51,7 @@ fn main() {
         .attr(wgdevice_attribute::IFINDEX as u16, ifindex as u32)
         .attr(
             wgdevice_attribute::MONITOR as u16,
-            (0 | wgdevice_monitor_flag::PEERS) as u8,
+            wgdevice_monitor_flag::PEERS as u8,
         );
 
     let resp = nlgen.send(set_monitor_cmd).unwrap();

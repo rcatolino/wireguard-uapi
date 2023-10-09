@@ -116,11 +116,13 @@ pub mod display {
 
     impl Display for super::Peer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f,
-                   "{} @ [{:?}]:{}, allowed ips : ",
-                   base64_encode_bytes(self.peer_key.as_slice()),
-                   self.endpoint.0,
-                   self.endpoint.1)?;
+            write!(
+                f,
+                "{} @ [{:?}]:{}, allowed ips : ",
+                base64_encode_bytes(self.peer_key.as_slice()),
+                self.endpoint.0,
+                self.endpoint.1
+            )?;
 
             for ip in self.allowed_ips.iter() {
                 write!(f, "{}/{}, ", ip.0, ip.1)?;
@@ -271,7 +273,7 @@ impl WireguardDev {
         let mut interfaces = nlroute.get_wireguard_interfaces()?.into_iter();
 
         let (name, index) = if let Some(ifname) = ifname_filter {
-            match interfaces.find(|(name, _)| name == &ifname) {
+            match interfaces.find(|(name, _)| name == ifname) {
                 Some(interface) => interface,
                 None => {
                     let msg = format!("No wireguard interface named {} found", ifname);
@@ -319,11 +321,8 @@ impl WireguardDev {
         let buffer = self.wgnl.send(get_dev_cmd)?;
         for msg in buffer.recv_msgs() {
             for attr in msg?.attributes() {
-                match attr.attribute_type {
-                    AttributeType::Nested(wgdevice_attribute::PEERS) => {
-                        return Ok(Self::parse_peers(attr.attributes()))
-                    }
-                    _ => (),
+                if let AttributeType::Nested(wgdevice_attribute::PEERS) = attr.attribute_type {
+                    return Ok(Self::parse_peers(attr.attributes()))
                 }
             }
         }
@@ -348,10 +347,7 @@ impl WireguardDev {
         let set_dev_cmd = peer_nest.attr_list_end();
         let buffer = self.wgnl.send(set_dev_cmd).unwrap();
         for mb_msg in buffer.recv_msgs() {
-            match mb_msg {
-                Err(e) => return Err(e),
-                _ => (),
-            }
+            mb_msg?;
         }
 
         Ok(())
@@ -368,10 +364,7 @@ impl WireguardDev {
 
         let buffer = self.wgnl.send(set_dev_cmd).unwrap();
         for mb_msg in buffer.recv_msgs() {
-            match mb_msg {
-                Err(e) => return Err(e),
-                _ => (),
-            }
+            mb_msg?;
         }
 
         Ok(())
