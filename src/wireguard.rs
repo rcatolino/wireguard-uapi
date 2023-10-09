@@ -130,9 +130,9 @@ pub mod display {
             }
 
             if let Some(ka) = self.keepalive {
-                write!(f, "keepalive : {}", ka)?;
+                write!(f, " keepalive : {}", ka)?;
             } else {
-                write!(f, "keepalive : None")?;
+                write!(f, " keepalive : None")?;
             }
 
             Ok(())
