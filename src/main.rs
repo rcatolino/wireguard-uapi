@@ -44,6 +44,11 @@ fn main() {
 
     println!("Using wireguard interface n°{} : {}", ifindex, ifname);
 
+    let nlbuffer = nlroute.subscribe_link(SockFlag::empty()).unwrap();
+    for mb_msg in nlbuffer.iter_links() {
+        println!("{:?}", mb_msg);
+    }
+
     let mut nlgen = NetlinkGeneric::new(SockFlag::empty(), WG_GENL_NAME).unwrap();
 
     let set_monitor_cmd = nlgen

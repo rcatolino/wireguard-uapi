@@ -267,6 +267,7 @@ impl<T: NlSerializer> NestBuilder<T> {
 /// Struct representing a wireguard interface on the system
 pub struct WireguardDev {
     wgnl: NetlinkGeneric,
+    nlroute: NetlinkRoute,
     pub name: String,
     pub index: i32,
 }
@@ -305,9 +306,19 @@ impl WireguardDev {
 
         Ok(WireguardDev {
             wgnl: NetlinkGeneric::new(SockFlag::empty(), WG_GENL_NAME).unwrap(),
+            nlroute,
             name,
             index,
         })
+    }
+
+    pub fn reset_index(self, newindex: i32) -> WireguardDev {
+        WireguardDev {
+            wgnl: self.wgnl,
+            nlroute: self.nlroute,
+            name: self.name,
+            index: newindex,
+        }
     }
 
     fn parse_peers<F: AsRawFd>(list: AttributeIterator<'_, F>) -> Vec<Peer> {
@@ -372,6 +383,10 @@ impl WireguardDev {
         }
 
         Ok(())
+    }
+
+    pub fn subscribe_link(&mut self, flags: SockFlag) -> Result<MsgBuffer<OwnedFd>> {
+        self.nlroute.subscribe_link(flags)
     }
 
     pub fn subscribe(&mut self, flags: SockFlag) -> Result<MsgBuffer<OwnedFd>> {

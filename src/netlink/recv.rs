@@ -14,6 +14,7 @@ use std::{fmt, mem};
 
 use super::bindings::{
     self, genlmsghdr, ifinfomsg, nl_align_length, nl_size_of_aligned, nlattr, nlmsghdr,
+    RTM_DELLINK, RTM_NEWLINK,
 };
 use super::{Error, Result};
 
@@ -283,7 +284,10 @@ impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
                         Err(e) => return Some(Err(e)),
                     }
                 }
-                NetlinkType::Route(msg_type) if header.nlmsg_type == msg_type => {
+                NetlinkType::Route
+                    if header.nlmsg_type as u32 == RTM_NEWLINK
+                        || header.nlmsg_type as u32 == RTM_DELLINK =>
+                {
                     match self
                         .msg
                         .deserialize::<ifinfomsg>(self.pos, current_msg_limit)
@@ -313,7 +317,7 @@ impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
 #[derive(Debug)]
 pub enum NetlinkType {
     Generic(u16),
-    Route(u16),
+    Route,
 }
 
 #[derive(Debug)]

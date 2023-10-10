@@ -1,19 +1,82 @@
 use std::ffi::CString;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 
-use nix::libc::AF_UNSPEC;
+use nix::libc::{AF_UNSPEC, RTMGRP_LINK};
 use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 
 use super::bindings::{ifinfomsg, IFLA_IFNAME, IFLA_LINKINFO, RTM_GETLINK, RTM_NEWLINK};
-use super::recv::{NetlinkType, SubHeader};
+use super::recv::{NetlinkType, PartIterator, SubHeader};
 use super::send::NlSerializer;
 use super::{AttributeType, MsgBuffer, MsgBuilder, Result};
 
 pub struct NetlinkRoute {
     fd: OwnedFd,
     seq: usize,
+}
+
+impl<F: AsRawFd> MsgBuffer<F> {
+    pub fn iter_links(&self) -> LinkEvIterator<F> {
+        LinkEvIterator {
+            msg_iter: self.recv_msgs(),
+        }
+    }
+}
+
+pub struct LinkEvIterator<'a, F: AsRawFd> {
+    msg_iter: PartIterator<'a, F>,
+}
+
+impl<F: AsRawFd> Iterator for LinkEvIterator<'_, F> {
+    type Item = Result<(u16, IfLink)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mb_msg = self.msg_iter.next()?;
+        let msg = match mb_msg {
+            Err(e) => return Some(Err(e)),
+            Ok(msg) => msg,
+        };
+
+        let (index, iftype) = match msg.sub_header {
+            SubHeader::RouteIfinfo(ifinfomsg {
+                ifi_index,
+                ifi_type,
+                ..
+            }) => (ifi_index, ifi_type),
+            _ => return None,
+        };
+
+        let mut ifname = None;
+        let mut type_name = None;
+        for attr in msg.attributes() {
+            match attr.attribute_type {
+                AttributeType::Raw(IFLA_IFNAME) => ifname = attr.get::<CString>(),
+                AttributeType::Raw(IFLA_LINKINFO) => {
+                    for sattr in attr.make_nested().attributes() {
+                        if let AttributeType::Raw(1) = sattr.attribute_type {
+                            type_name = sattr.get::<CString>();
+                        }
+                    }
+                }
+                _ => (), // println!("Unknown attr : {:?}", attr),
+            }
+        }
+
+        let link_info = IfLink {
+            name: if let Some(name) = ifname {
+                name
+            } else {
+                return None;
+            },
+            iftype,
+            type_name,
+            index,
+        };
+
+        // println!("Msgtype : {}, Interface {:?} was changed", msg.header.nlmsg_type, link_info);
+        Some(Ok((msg.header.nlmsg_type, link_info)))
+    }
 }
 
 impl NetlinkRoute {
@@ -29,6 +92,20 @@ impl NetlinkRoute {
         NetlinkRoute { fd, seq: 1 }
     }
 
+    /// Creates and returns a new netlink socket subscribed to the specified multicast group
+    pub fn subscribe_link(&self, flags: SockFlag) -> Result<MsgBuffer<OwnedFd>> {
+        let fd = socket(
+            AddressFamily::Netlink,
+            SockType::Raw,
+            flags,
+            SockProtocol::NetlinkRoute,
+        )?;
+
+        println!("Subscribing to group id : {}", RTMGRP_LINK);
+        bind(fd.as_raw_fd(), &NetlinkAddr::new(0, RTMGRP_LINK as u32)).unwrap();
+        Ok(MsgBuffer::new(NetlinkType::Route, fd))
+    }
+
     pub fn get_interfaces(&mut self) -> Result<Vec<IfLink>> {
         MsgBuilder::new(RTM_GETLINK as u16, 1)
             .dump()
@@ -36,47 +113,13 @@ impl NetlinkRoute {
             .sendto(&self.fd)?;
 
         self.seq += 1;
-        let buffer = MsgBuffer::new(NetlinkType::Route(RTM_NEWLINK as u16), self.fd.as_fd());
+        let buffer = MsgBuffer::new(NetlinkType::Route, self.fd.as_fd());
         let mut result = Vec::new();
-        for mb_msg in buffer.recv_msgs() {
-            let msg = mb_msg?;
-            let (index, iftype) = match msg.sub_header {
-                SubHeader::RouteIfinfo(ifinfomsg {
-                    ifi_index,
-                    ifi_type,
-                    ..
-                }) => (ifi_index, ifi_type),
-                _ => continue,
-            };
-
-            let mut ifname = None;
-            let mut type_name = None;
-            for attr in msg.attributes() {
-                match attr.attribute_type {
-                    AttributeType::Raw(IFLA_IFNAME) => ifname = attr.get::<CString>(),
-                    AttributeType::Raw(IFLA_LINKINFO) => {
-                        for sattr in attr.make_nested().attributes() {
-                            if let AttributeType::Raw(1) = sattr.attribute_type {
-                                type_name = sattr.get::<CString>();
-                            }
-                        }
-                    }
-                    _ => (), // println!("Unknown attr : {:?}", attr),
-                }
+        for mb_msg in buffer.iter_links() {
+            let (msgtype, link_info) = mb_msg?;
+            if msgtype as u32 == RTM_NEWLINK {
+                result.push(link_info);
             }
-
-            let link_info = IfLink {
-                name: if let Some(name) = ifname {
-                    name
-                } else {
-                    continue;
-                },
-                iftype,
-                type_name,
-                index,
-            };
-
-            result.push(link_info);
         }
 
         Ok(result)

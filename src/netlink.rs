@@ -6,7 +6,7 @@ mod send;
 
 pub use bindings::{
     wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute,
-    wgpeer_flag, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
+    wgpeer_flag, RTM_DELLINK, RTM_NEWLINK, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
 };
 
 pub use generic::NetlinkGeneric;
