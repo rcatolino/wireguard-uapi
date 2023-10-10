@@ -64,11 +64,7 @@ impl<F: AsRawFd> Iterator for LinkEvIterator<'_, F> {
         }
 
         let link_info = IfLink {
-            name: if let Some(name) = ifname {
-                name
-            } else {
-                return None;
-            },
+            name: ifname?,
             iftype,
             type_name,
             index,

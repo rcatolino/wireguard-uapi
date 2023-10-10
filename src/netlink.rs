@@ -23,6 +23,7 @@ pub enum Error {
     Invalid,
     WrongGroupName,
     InvalidGroupId,
+    NoInterfaceFound,
     Other(String),
     OsError(nix::errno::Errno),
     IoError(std::io::Error),
