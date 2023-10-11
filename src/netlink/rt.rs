@@ -59,7 +59,8 @@ impl<F: AsRawFd> Iterator for LinkEvIterator<'_, F> {
                         }
                     }
                 }
-                _ => (), // println!("Unknown attr : {:?}", attr),
+                // _ => (),
+                _ => println!("Unknown ifla attr : {:?}", attr),
             }
         }
 
