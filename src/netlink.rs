@@ -1,19 +1,16 @@
-mod bindings;
+//! Netlink Generic and Netlink Route APIs
+
+pub mod bindings;
 mod generic;
 mod recv;
 mod rt;
 mod send;
 
-pub use bindings::{
-    wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute,
-    wgpeer_flag, RTM_DELLINK, RTM_NEWLINK, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
-};
-
 pub use generic::NetlinkGeneric;
 use nix;
-pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer, NetlinkType, SubHeader};
-pub use rt::{IfLink, NetlinkRoute};
-pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr};
+pub use recv::{Attribute, AttributeIterator, AttributeType, MsgBuffer, MsgPart, PartIterator, SubHeader};
+pub use rt::{IfLink, LinkEvIterator, NetlinkRoute};
+pub use send::{MsgBuilder, NestBuilder, NlSerializer, ToAttr, MAX_NL_MSG_SIZE};
 
 #[derive(Debug)]
 pub enum Error {

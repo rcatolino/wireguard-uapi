@@ -9,6 +9,8 @@ use std::io::Result;
 use std::mem;
 use std::os::fd::AsRawFd;
 
+pub const MAX_NL_MSG_SIZE: usize = 2048;
+
 pub trait ToAttr: Sized {
     fn serialize_at(self, out: &mut [u8], pos: usize) -> usize;
 }
@@ -67,15 +69,25 @@ unsafe impl ReprC for sockaddr_in {}
 unsafe impl ReprC for ifinfomsg {}
 
 pub trait NlSerializer {
+    /// Adds a new attribute into the current message builder or the current nested attribute.
     fn attr<T: ToAttr>(self, attr_type: u16, payload: T) -> Self;
+
+    /// Adds a new byte array attribute into the current message builder or the current
+    /// nested attribute.
     fn attr_bytes(self, attr_type: u16, payload: &[u8]) -> Self;
+
+    #[doc(hidden)]
     fn pos(&self) -> usize;
+    #[doc(hidden)]
     fn seek(&mut self, len: usize) {
         self.seek_to(self.pos() + len);
     }
-
+    #[doc(hidden)]
     fn seek_to(&mut self, pos: usize);
+    #[doc(hidden)]
     fn buffer(&mut self) -> &mut [u8];
+
+    /// Starts a new attribute nest in the current message builder or nested attribute.
     fn attr_list_start(mut self, attr_type: u16) -> NestBuilder<Self>
     where
         Self: Sized,
@@ -92,6 +104,7 @@ pub trait NlSerializer {
         }
     }
 
+    #[doc(hidden)]
     /// Copy an object bytes to the message buffer, at the specified location
     /// keeping netlink alignment constraints.
     /// Returns the buffer position after the content written (+ eventual padding)
@@ -103,6 +116,7 @@ pub trait NlSerializer {
         pos + nl_size_of_aligned::<T>()
     }
 
+    #[doc(hidden)]
     /// Copy an object bytes to the message buffer, keepink netlink alignment constraints.
     /// Advances the buffer's write head to point past the content written (+ eventual padding)
     fn write_obj<T: Sized + ReprC>(&mut self, payload: T) {
@@ -111,6 +125,7 @@ pub trait NlSerializer {
     }
 }
 
+/// Netlink message attribute nest
 pub struct NestBuilder<U: NlSerializer> {
     upper: U,
     start_pos: usize,
@@ -160,8 +175,12 @@ impl<U: NlSerializer> NestBuilder<U> {
     }
 }
 
+/// Netlink query builder.
+///
+/// All messages are built with the `NLM_F_REQUEST | NLM_F_ACK` flags set by default.
+/// The maximum message size is [MAX_NL_MSG_SIZE] bytes.
 pub struct MsgBuilder {
-    pub inner: [u8; 2048],
+    pub inner: [u8; MAX_NL_MSG_SIZE],
     pub header: nlmsghdr,
     pub pos: usize,
 }
@@ -207,15 +226,15 @@ impl NlSerializer for MsgBuilder {
 }
 
 impl MsgBuilder {
-    pub fn new(family: u16, seq: u32) -> Self {
+    pub(crate) fn new(family: u16, seq: u32) -> Self {
         MsgBuilder {
-            inner: [0u8; 2048],
+            inner: [0u8; MAX_NL_MSG_SIZE],
             header: nlmsghdr::new(family, seq),
             pos: nl_size_of_aligned::<nlmsghdr>(),
         }
     }
 
-    pub fn generic(mut self, cmd: u8) -> Self {
+    pub(crate) fn generic(mut self, cmd: u8) -> Self {
         let gen_header = genlmsghdr {
             cmd,
             version: 1,
@@ -226,12 +245,13 @@ impl MsgBuilder {
         self
     }
 
+    /// Set the `NLM_F_DUMP` flag on the message
     pub fn dump(mut self) -> Self {
         self.header.nlmsg_flags |= NLM_F_DUMP;
         self
     }
 
-    pub fn sendto<T: AsRawFd>(&mut self, fd: &T) -> Result<usize> {
+    pub(crate) fn sendto<T: AsRawFd>(&mut self, fd: &T) -> Result<usize> {
         // Serialize headers
         self.header.nlmsg_len = self.pos as u32;
         self.write_obj_at(self.header, 0);

@@ -11,6 +11,10 @@ use super::recv::{NetlinkType, PartIterator, SubHeader};
 use super::send::NlSerializer;
 use super::{AttributeType, MsgBuffer, MsgBuilder, Result};
 
+/// Netlink route connection
+///
+/// This type doesn't offer generic send/receive methods like the [NetlinkGeneric](super::NetlinkGeneric) one.
+/// Instead only only some specific methods are implemented.
 pub struct NetlinkRoute {
     fd: OwnedFd,
     seq: usize,
@@ -24,6 +28,7 @@ impl<F: AsRawFd> MsgBuffer<F> {
     }
 }
 
+/// Iterator over link messages in a netlink route connection.
 pub struct LinkEvIterator<'a, F: AsRawFd> {
     msg_iter: PartIterator<'a, F>,
 }
@@ -76,6 +81,7 @@ impl<F: AsRawFd> Iterator for LinkEvIterator<'_, F> {
 }
 
 impl NetlinkRoute {
+    /// Returns a new connection to the Netlink Route family
     pub fn new(flags: SockFlag) -> Self {
         let fd = socket(
             AddressFamily::Netlink,
@@ -102,6 +108,7 @@ impl NetlinkRoute {
         Ok(MsgBuffer::new(NetlinkType::Route, fd))
     }
 
+    /// Returns all interfaces existing on the system
     pub fn get_interfaces(&mut self) -> Result<Vec<IfLink>> {
         MsgBuilder::new(RTM_GETLINK as u16, 1)
             .dump()
@@ -122,6 +129,7 @@ impl NetlinkRoute {
     }
 }
 
+/// Struct representing an interface on the system
 #[derive(Debug)]
 pub struct IfLink {
     pub name: CString,

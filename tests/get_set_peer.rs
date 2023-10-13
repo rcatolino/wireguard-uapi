@@ -1,8 +1,7 @@
 use nix::sys::socket::SockFlag;
 use std::ffi::CString;
-use wireguard_uapi::netlink::{
-    self, wg_cmd, wgdevice_attribute, AttributeType, NetlinkGeneric, NetlinkRoute, NlSerializer,
-};
+use wireguard_uapi::netlink::bindings::{wg_cmd, wgdevice_attribute, WG_GENL_NAME};
+use wireguard_uapi::netlink::{AttributeType, NetlinkGeneric, NetlinkRoute, NlSerializer};
 use wireguard_uapi::wireguard::Peer;
 
 #[test]
@@ -16,7 +15,7 @@ fn get_set_device() {
         .expect("No wireguard interface found");
 
     println!("Using wireguard interface n°{} : {}", ifindex, ifname);
-    let mut nlgen = NetlinkGeneric::new(SockFlag::empty(), netlink::WG_GENL_NAME).unwrap();
+    let mut nlgen = NetlinkGeneric::new(SockFlag::empty(), WG_GENL_NAME).unwrap();
     let get_dev_cmd = nlgen
         .build_message(wg_cmd::GET_DEVICE as u8)
         .dump()

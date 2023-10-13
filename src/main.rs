@@ -2,10 +2,14 @@ use std::ffi::CString;
 use std::os::fd::AsRawFd;
 
 use nix::sys::socket::SockFlag;
+use wireguard_uapi::netlink::bindings::{
+    wg_cmd, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute,
+    WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
+};
+
 use wireguard_uapi::netlink::{
-    wg_cmd, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute, AttributeIterator,
-    AttributeType, NetlinkGeneric, NetlinkRoute, NlSerializer, SubHeader, WG_GENL_NAME,
-    WG_MULTICAST_GROUP_PEERS,
+    AttributeIterator, AttributeType, NetlinkGeneric,
+    NetlinkRoute, NlSerializer, SubHeader,
 };
 
 use wireguard_uapi::wireguard::Peer;

@@ -1,12 +1,18 @@
+//! Wireguard configuration and event monitoring tools built on netlink
+
 use nix::libc::{in_addr, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
 use nix::sys::socket::SockFlag;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::netlink::{
+use crate::netlink::bindings::{
     wg_cmd, wgallowedip_attribute, wgdevice_attribute, wgdevice_monitor_flag, wgpeer_attribute,
-    wgpeer_flag, Attribute, AttributeIterator, AttributeType, Error, MsgBuffer, NestBuilder,
-    NetlinkGeneric, NetlinkRoute, NlSerializer, Result, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
+    wgpeer_flag, WG_GENL_NAME, WG_MULTICAST_GROUP_PEERS,
+};
+
+use crate::netlink::{
+    Attribute, AttributeIterator, AttributeType, Error, MsgBuffer, NestBuilder, NetlinkGeneric,
+    NetlinkRoute, NlSerializer, Result,
 };
 
 use std::mem::size_of;
@@ -100,6 +106,7 @@ fn parse_allowed_ip<F: AsRawFd>(ip_attr: Attribute<'_, F>) -> Option<(IpAddr, u8
     Some((ip, mask?))
 }
 
+/// Struct representing a wireguard peer
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Peer {
@@ -111,6 +118,7 @@ pub struct Peer {
 
 #[cfg(feature = "display")]
 pub mod display {
+    //! [Display] trait implementation for [super::Peer]
     use base64_light::base64_encode_bytes;
     use std::fmt::Display;
 
@@ -141,6 +149,13 @@ pub mod display {
 }
 
 impl Peer {
+    /// Builds a Peer from a netlink message attribute `wgdevice_attribute::PEER`,
+    /// such as one from a response to a netlink/wireguard `CMD_GET_DEVICE` query,
+    /// or from a `CMD_SET_PEER` notification.
+    ///
+    /// Returns `None` if no `PUBLIC_KEY` attribute was found.
+    ///
+    /// Existing peers can be retrieved with [WireguardDev::get_peers()] instead.
     pub fn new<F: AsRawFd>(attributes: AttributeIterator<'_, F>) -> Option<Self> {
         let mut peer_key = Vec::new();
         let mut endpoint = None;
@@ -272,6 +287,14 @@ pub struct WireguardDev {
 }
 
 impl WireguardDev {
+    /// Returns a [WireguardDev] representing an existing wireguard interface on the system.
+    ///
+    /// If `ifname_filter` is `Some` the interface name must be the same as specified in the
+    /// filter.
+    ///
+    /// If `ifname_filter` is None and only one wireguard interface exists, that interface
+    /// will be returned. If mutliple wireguard interfaces exist, an error will be returned.
+    /// In that case you'll have to specify the name of the interface you wish to get.
     pub fn new(ifname_filter: Option<&str>) -> Result<Self> {
         let mut nlroute = NetlinkRoute::new(SockFlag::empty());
         let mut interfaces = nlroute.get_wireguard_interfaces()?.into_iter();
@@ -313,6 +336,7 @@ impl WireguardDev {
             .collect()
     }
 
+    /// Returns all the peers setup on the current wireguard interface.
     pub fn get_peers(&mut self) -> Result<Vec<Peer>> {
         let get_dev_cmd = self
             .wgnl
@@ -332,6 +356,13 @@ impl WireguardDev {
         Ok(Vec::new())
     }
 
+    /// Create or update peers on the wireguard interface.
+    ///
+    /// If [Peer::keepalive] or [Peer::endpoint] is `None`, the current value for that peer will not
+    /// be modified. [Peer::keepalive] can be disabled by setting it to 0.
+    ///
+    /// Any specified `allowed_ip` will always be added to the peer `allowed_ips` list, the only
+    /// way to remove an `allowed_ip` is to remove the peer and re-set it.
     pub fn set_peers<'a, I>(&mut self, peers: I) -> Result<()>
     where
         I: IntoIterator<Item = &'a Peer>,
@@ -355,6 +386,7 @@ impl WireguardDev {
         Ok(())
     }
 
+    /// Removes the peer with the specified public key from the wireguard interface.
     pub fn remove_peer(&mut self, peer_key: &[u8]) -> Result<()> {
         let set_dev_cmd = self
             .wgnl
@@ -372,6 +404,8 @@ impl WireguardDev {
         Ok(())
     }
 
+    /// Returns a netlink message buffer which you can use to receive notifications when the
+    /// wireguard interface configuration changes.
     pub fn subscribe(&mut self, flags: SockFlag) -> Result<MsgBuffer<OwnedFd>> {
         let set_monitor_cmd = self
             .wgnl

@@ -9,6 +9,7 @@ use nix::sys::socket::{
     bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 
+/// Netlink generic connection
 pub struct NetlinkGeneric {
     fd: OwnedFd,
     seq: u32,
@@ -17,6 +18,8 @@ pub struct NetlinkGeneric {
 }
 
 impl NetlinkGeneric {
+    /// Creates a new netlink generic connection.
+    /// Existing family names on a system can be retrieved with the `gen-ctrl-list` command.
     pub fn new(flags: SockFlag, family_name: &[u8]) -> Result<Self> {
         let fd = socket(
             AddressFamily::Netlink,
@@ -36,12 +39,15 @@ impl NetlinkGeneric {
         Ok(nl)
     }
 
+    /// Returns a new message builder bound to this netlink connection.
     pub fn build_message(&mut self, cmd: u8) -> MsgBuilder {
         let builder = MsgBuilder::new(self.family, self.seq).generic(cmd);
         self.seq += 1;
         builder
     }
 
+    /// Send a message buffer that was created using a [MsgBuilder] created with
+    /// [Self::build_message]
     pub fn send(&self, mut msg: MsgBuilder) -> Result<MsgBuffer<BorrowedFd<'_>>> {
         msg.sendto(&self.fd)?;
         Ok(MsgBuffer::new(
@@ -51,6 +57,10 @@ impl NetlinkGeneric {
     }
 
     /// Creates and returns a new netlink socket subscribed to the specified multicast group
+    ///
+    /// Multicast group name available on the current system can be listed with the command
+    /// `genl ctrl ls`. The [Self::mcast_groups] member of the NetlinkGeneric struct also
+    /// contains all the multicast group existing for the current connection.
     pub fn subscribe(&self, flags: SockFlag, group_name: &[u8]) -> Result<MsgBuffer<OwnedFd>> {
         let fd = socket(
             AddressFamily::Netlink,

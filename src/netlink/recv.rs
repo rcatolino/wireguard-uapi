@@ -19,6 +19,7 @@ use super::bindings::{
 use super::{Error, Result};
 
 pub trait FromAttr: Sized {
+    /// Transforms the netlink buffer into [Self] type.
     fn from_attr(buffer: &[u8]) -> Option<Self>;
 }
 
@@ -56,12 +57,16 @@ impl FromAttr for CString {
     }
 }
 
+/// Netlink attribute type.
 #[derive(Debug)]
 pub enum AttributeType {
     Nested(u32),
     Raw(u32),
 }
 
+/// Netlink attribute.
+///
+/// A netlink message is composed of a tree of such attributes.
 pub struct Attribute<'a, T: AsRawFd> {
     payload_start: usize,
     payload_end: usize,
@@ -109,18 +114,25 @@ impl<'a, F: AsRawFd> Attribute<'a, F> {
         }
     }
 
+    /// Get the payload as a byte slice
     pub fn get_bytes(&self) -> Option<Ref<'a, [u8]>> {
         Some(Ref::map(self.msg.inner.borrow(), |b| {
             b.get(self.payload_start..self.payload_end).unwrap()
         }))
     }
 
+    /// Get a copy of the payload.
     pub fn get<T: FromAttr>(&self) -> Option<T> {
         T::from_attr(&self.get_bytes()?)
     }
 
     /// Returns a new attribute pointing to the same data, but make it nested.
     /// This is useful for RT attributes that don't set the nested flag.
+    ///
+    /// Note : in many part of the nelink API nested attribute are returned by the kernel
+    /// without the `NLA_F_NESTED` flag set. These attribute are therefore marked as `Raw`.
+    /// You can use this method to convert them into `Nested` attribute if you know for sure
+    /// this attribute type is nested.
     pub fn make_nested(&self) -> Self {
         Attribute {
             payload_start: self.payload_start,
@@ -134,7 +146,7 @@ impl<'a, F: AsRawFd> Attribute<'a, F> {
     }
 
     /// Returns an iterator over the sub-attributes.
-    /// If the current attribute is not nested, the iterator will only yield None
+    /// If the current attribute is not nested, the iterator will only yield `None`
     pub fn attributes(&self) -> AttributeIterator<'a, F> {
         match self.attribute_type {
             AttributeType::Raw(_) => AttributeIterator {
@@ -180,6 +192,7 @@ pub enum SubHeader {
     None,
 }
 
+/// Netlink received message, potentially part of a multi-part message.
 #[derive(Debug)]
 pub struct MsgPart<'a, F: AsRawFd> {
     pub header: nlmsghdr,
@@ -190,9 +203,10 @@ pub struct MsgPart<'a, F: AsRawFd> {
 }
 
 impl<F: AsRawFd> MsgPart<'_, F> {
+    /// Returns an iterator over all the [attributes](Attribute) of this message.
     // Here we don't bind the lifetime of the attribute iterator to the lifetime of MsgPart's
     // buffer, because the attributes shouldn't outlive the inner buffer. They will point to
-    // the wrong bytes if MsgBuffer::recv has been called after the attribute has been created.
+    // the wrong bytes if MsgBuffer::recv is been called after the attribute has been created.
     pub fn attributes(&self) -> AttributeIterator<'_, F> {
         AttributeIterator {
             pos: self.attributes_start,
@@ -202,6 +216,11 @@ impl<F: AsRawFd> MsgPart<'_, F> {
     }
 }
 
+/// Iterator over all the messages in a multi-part netlink response.
+///
+/// If the message is not multi-part, this iterator yields only the message, and any potential
+/// NLMSG_ERROR message indicating an error.
+/// The NLMSG_ERROR message indicating success is ignored.
 pub struct PartIterator<'a, F: AsRawFd> {
     pos: usize,
     msg: &'a MsgBuffer<F>,
@@ -315,22 +334,23 @@ impl<'a, F: AsRawFd> Iterator for PartIterator<'a, F> {
 }
 
 #[derive(Debug)]
-pub enum NetlinkType {
+pub(crate) enum NetlinkType {
     Generic(u16),
     Route,
 }
 
+/// Receive buffer for a netlink socket
 #[derive(Debug)]
 #[repr(align(4))] // netlink headers need at most 4 byte alignment
 pub struct MsgBuffer<F: AsRawFd> {
-    pub inner: RefCell<[u8; 4096]>,
+    inner: RefCell<[u8; 4096]>,
     size: Cell<usize>,
     msg_type: NetlinkType,
     fd: F,
 }
 
 impl<F: AsRawFd> MsgBuffer<F> {
-    pub fn new(msg_type: NetlinkType, fd: F) -> Self {
+    pub(crate) fn new(msg_type: NetlinkType, fd: F) -> Self {
         MsgBuffer {
             inner: [0u8; 4096].into(),
             size: 0.into(),
@@ -368,7 +388,7 @@ impl<F: AsRawFd> MsgBuffer<F> {
         Ok(())
     }
 
-    /// Returns an iterator over all the messages in a multi part message
+    /// Returns an iterator over all the [messages](MsgPart) in a multi part message
     pub fn recv_msgs(&self) -> PartIterator<'_, F> {
         PartIterator { pos: 0, msg: self }
     }
